@@ -1,17 +1,18 @@
 #include <Arduino.h>
 #include "Adafruit_NeoPixel.h"
-#include "BMI160.h"
 
 #define BUTTON1_PIN 2
 #define BUTTON2_PIN 3
+#define BUTTON3_PIN 4 // not touch sensor, will be hidden for necessarry functions
 
-#define NEO_PIN 6         // Define pin for right side LEDs
-#define NEO_NUMPIXEL 32 // Number of LEDs per side
+#define NEO_PIN 6           // Define pin for right side LEDs
+#define NEO_NUMPIXEL 32     // Number of LEDs per side
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
 Adafruit_NeoPixel strip(NEO_NUMPIXEL_PER, NEO_PIN, NEO_GRB + NEO_KHZ800);
 
 int brightness = 50;
 int color[] = {255, 255, 255}; // Default color: white
+bool persistentColor = false;
 
 // Different operational modes for the cosplay mask
 enum Mode
@@ -19,7 +20,8 @@ enum Mode
   OFF,
   ACTIVE,
   MANUAL,
-  ERROR
+  ERROR,
+  Mode_COUNT
 };
 Mode currentMode = OFF;
 
@@ -30,26 +32,30 @@ enum Expression
   HAPPY,
   SAD,
   ANGRY,
-  SHOCKED
+  SHOCKED,
+  Expression_COUNT
 };
 Expression currentExpression = NEUTRAL;
+Expression nextExpression = NEUTRAL;
+bool expressionPreSelection = false;
 
 void setup()
 {
 
-  strip.begin();
+  if (strip.begin())
+  {
+    Serial.println("NeoPixel strip initialized.");
+  }
+  else
+  {
+    Serial.println("Failed to initialize NeoPixel strip!");
+  }
+
   strip.setBrightness(brightness);
   strip.show(); // Initialize all pixels to 'off'
-  try
-  {
-    pinMode(BUTTON1_PIN, INPUT_PULLUP);
-    pinMode(BUTTON2_PIN, INPUT_PULLUP);
-  }
-  catch (const std::exception &e)
-  {
-    currentMode = ERROR;
-    expressionTimer = millis();
-  }
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(BUTTON3_PIN, INPUT_PULLUP);
 }
 
 void loop()
@@ -78,6 +84,11 @@ void processExpressions()
     setAngryExpression();
     break;
   case SHOCKED:
+    setShockedExpression();
+    break;
+  default:
+    setNeutralExpression();
+    break;
   }
 }
 int errorPattern[NEO_NUMPIXEL_PER] = {255, 0, 0, 0,
@@ -105,17 +116,21 @@ int angryPattern[NEO_NUMPIXEL_PER] = {255, 63, 0, 0,
                                       0, 0, 63, 255,
                                       0, 0, 0, 0};
 int shockedPattern[NEO_NUMPIXEL_PER] = {0, 0, 0, 0,
-                                       0, 255, 63, 0,
-                                       0, 63, 63, 0,
-                                       0, 0, 0, 0};
+                                        0, 255, 63, 0,
+                                        0, 63, 63, 0,
+                                        0, 0, 0, 0};
 
 const int neutralExpressionDuration = 5000;
 const int blinkDuration = 500;
 void setNeutralExpression()
 {
-  color[0] = 255;
-  color[1] = 255;
-  color[2] = 255;
+  if (!persistentColor)
+  {
+    color[0] = 255;
+    color[1] = 255;
+    color[2] = 255;
+  }
+
   uint32_t adjustedColor = getColorFromBrightness(color, brightness);
   int currentTime = millis();
   int *currentPattern;
@@ -146,32 +161,46 @@ void setNeutralExpression()
 
 void setHappyExpression()
 {
-  color[0] = 255;
-  color[1] = 255;
-  color[2] = 0;
+  if (!persistentColor)
+  {
+    color[0] = 255;
+    color[1] = 255;
+    color[2] = 0;
+  }
+
   setLedsFromPattern(happyPattern);
 }
 void setSadExpression()
 {
-  color[0] = 0;
-  color[1] = 50;
-  color[2] = 255;
+  if (!persistentColor)
+  {
+    color[0] = 0;
+    color[1] = 50;
+    color[2] = 255;
+  }
+
   setLedsFromPattern_Left(sadPattern);
   setLedsFromPattern_Right(getSymetricPattern(sadPattern));
 }
 void setAngryExpression()
 {
-  color[0] = 255;
-  color[1] = 0;
-  color[2] = 0;
+  if (!persistentColor)
+  {
+    color[0] = 255;
+    color[1] = 0;
+    color[2] = 0;
+  }
   setLedsFromPattern_Left(angryPattern);
   setLedsFromPattern_Right(getSymetricPattern(angryPattern));
 }
 void setShockedExpression()
 {
-  color[0] = 255;
-  color[1] = 255;
-  color[2] = 255;
+  if (!persistentColor)
+  {
+    color[0] = 255;
+    color[1] = 255;
+    color[2] = 255;
+  }
   int currentTime = millis();
   if (currentTime - expressionTimer < 500)
   {
@@ -283,12 +312,13 @@ int *lerpBetweenPatterns(int patternA[], int patternB[], float t)
   return lerpedPattern;
 }
 
-int *getSymetricPattern(int pattern[])
-{
+int *getSymetricPattern(int pattern[]) {
   static int symetricPattern[NEO_NUMPIXEL_PER];
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-  {
-    symetricPattern[i] = pattern[NEO_NUMPIXEL_PER - 1 - i];
+  for (int row = 0; row < 4; row++) {
+    for (int col = 0; col < 4; col++) {
+      // Mirror columns: 0->3, 1->2, 2->1, 3->0
+      symetricPattern[row * 4 + col] = pattern[row * 4 + (3 - col)];
+    }
   }
   return symetricPattern;
 }
@@ -305,18 +335,22 @@ uint32_t getColorFromBrightness(int baseColor[], int brightness)
 
 unsigned long button1PressTime = 0;
 unsigned long button2PressTime = 0;
+unsigned long button3PressTime = 0;
 unsigned long button1LastEventTime = 0;
 unsigned long button2LastEventTime = 0;
+unsigned long button3LastEventTime = 0;
 const unsigned long doubleTapWindow = 300;
 const unsigned long holdThreshold = 1000;
 const unsigned long holdDebounce = 200;
 bool button1Held = false;
 bool button2Held = false;
+bool button3Held = false;
 
 void handleButtons()
 {
   handleButton1();
   handleButton2();
+  handleButton3();
 }
 
 void handleButton1()
@@ -327,27 +361,29 @@ void handleButton1()
   if (pressed && button1PressTime == 0)
   {
     button1PressTime = currentTime;
+    button1Held = false;
   }
   else if (!pressed && button1PressTime != 0)
   {
     unsigned long pressDuration = currentTime - button1PressTime;
 
-    if (pressDuration >= holdThreshold)
+    if (pressDuration < holdThreshold)
     {
-      button1Held = false;
-    }
-    else if (currentTime - button1LastEventTime < doubleTapWindow)
-    {
-      onButton1DoubleTap();
-      button1LastEventTime = 0;
-    }
-    else
-    {
-      button1LastEventTime = currentTime;
+      if (currentTime - button1LastEventTime < doubleTapWindow)
+      {
+        onButton1DoubleTap();
+        button1LastEventTime = 0;
+      }
+      else
+      {
+        onButton1Tap();
+        button1LastEventTime = currentTime;
+      }
     }
     button1PressTime = 0;
+    button1Held = false;
   }
-  else if (pressed && button1Held == false && currentTime - button1PressTime >= holdThreshold)
+  else if (pressed && !button1Held && currentTime - button1PressTime >= holdThreshold)
   {
     onButton1Hold();
     button1Held = true;
@@ -362,45 +398,164 @@ void handleButton2()
   if (pressed && button2PressTime == 0)
   {
     button2PressTime = currentTime;
+    button2Held = false;
   }
   else if (!pressed && button2PressTime != 0)
   {
     unsigned long pressDuration = currentTime - button2PressTime;
 
-    if (pressDuration >= holdThreshold)
+    if (pressDuration < holdThreshold)
     {
-      button2Held = false;
-    }
-    else if (currentTime - button2LastEventTime < doubleTapWindow)
-    {
-      onButton2DoubleTap();
-      button2LastEventTime = 0;
-    }
-    else
-    {
-      button2LastEventTime = currentTime;
+      if (currentTime - button2LastEventTime < doubleTapWindow)
+      {
+        onButton2DoubleTap();
+        button2LastEventTime = 0;
+      }
+      else
+      {
+        onButton2Tap();
+        button2LastEventTime = currentTime;
+      }
     }
     button2PressTime = 0;
+    button2Held = false;
   }
-  else if (pressed && button2Held == false && currentTime - button2PressTime >= holdThreshold)
+  else if (pressed && !button2Held && currentTime - button2PressTime >= holdThreshold)
   {
     onButton2Hold();
     button2Held = true;
   }
 }
 
-void onButton1Tap() { currentMode = ACTIVE; }
-void onButton1DoubleTap() { currentExpression = (Expression)((currentExpression + 1) % 4); }
-void onButton1Hold() { currentMode = OFF; }
+void handleButton3()
+{
+  unsigned long currentTime = millis();
+  bool pressed = digitalRead(BUTTON3_PIN) == LOW;
 
-void onButton2Tap() { brightness = (brightness + 50) % 256; }
+  if (pressed && button3PressTime == 0)
+  {
+    button3PressTime = currentTime;
+    button3Held = false;
+  }
+  else if (!pressed && button3PressTime != 0)
+  {
+    unsigned long pressDuration = currentTime - button3PressTime;
+
+    if (pressDuration < holdThreshold)
+    {
+      if (currentTime - button3LastEventTime < doubleTapWindow)
+      {
+        onButton3DoubleTap();
+        button3LastEventTime = 0;
+      }
+      else
+      {
+        onButton3Tap();
+        button3LastEventTime = currentTime;
+      }
+    }
+    button3PressTime = 0;
+    button3Held = false;
+  }
+  else if (pressed && !button3Held && currentTime - button3PressTime >= holdThreshold)
+  {
+    onButton3Hold();
+    button3Held = true;
+  }
+}
+
+// Button events
+void onButton1Tap()
+{
+  if (expressionPreSelection)
+  {
+    selectExpression(nextExpression);
+    expressionPreSelection = false;
+  }
+  else
+  {
+    cycleExpression();
+  }
+}
+void onButton1DoubleTap()
+{
+}
+void onButton1Hold()
+{
+  expressionPreSelectToggle();
+}
+void onButton2Tap()
+{
+  cycleExpression();
+}
 void onButton2DoubleTap()
 {
-  color[0] = 255;
-  color[1] = 0;
-  color[2] = 0;
 }
-void onButton2Hold() { brightness = 50; }
+void onButton2Hold()
+{
+  cycleMode();
+}
+void onButton3Tap()
+{
+}
+void onButton3DoubleTap()
+{
+}
+void onButton3Hold()
+{
+}
+
+// helpers
+void cycleMode()
+{
+  switch (currentMode)
+  {
+  case OFF:
+    currentMode = ACTIVE;
+    break;
+  case ACTIVE:
+    currentMode = MANUAL;
+    break;
+  case MANUAL:
+    currentMode = OFF;
+    break;
+  default:
+    currentMode = OFF;
+    break;
+  }
+}
+
+void cycleExpression()
+{
+  currentExpression = (Expression)((currentExpression + 1) % Expression_COUNT);
+}
+
+void cycleBrightness()
+{
+  brightness += 51;
+  if (brightness > 255)
+    brightness = 0;
+}
+
+void selectNextExpression()
+{
+  nextExpression = (Expression)((nextExpression + 1) % Expression_COUNT);
+}
+
+void selectExpression(Expression expr)
+{
+  nextExpression = expr;
+}
+
+void expressionPreSelectToggle()
+{
+  expressionPreSelection = !expressionPreSelection;
+}
+
+void togglePersistentColor()
+{
+  persistentColor = !persistentColor;
+}
 
 /*
 0 1 2 3
