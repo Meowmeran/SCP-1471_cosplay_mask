@@ -5,11 +5,10 @@
 #define BUTTON1_PIN 2
 #define BUTTON2_PIN 3
 
-#define NEO_PIN_R 6         // Define pin for right side LEDs
-#define NEO_PIN_L 7         // Define pin for left side LEDs
+#define NEO_PIN 6         // Define pin for right side LEDs
+#define NEO_NUMPIXEL 32 // Number of LEDs per side
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
-Adafruit_NeoPixel stripR(NEO_NUMPIXEL_PER, NEO_PIN_R, NEO_GRB + NEO_KHZ800);
-Adafruit_NeoPixel stripL(NEO_NUMPIXEL_PER, NEO_PIN_L, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip(NEO_NUMPIXEL_PER, NEO_PIN, NEO_GRB + NEO_KHZ800);
 
 int brightness = 50;
 int color[] = {255, 255, 255}; // Default color: white
@@ -38,12 +37,9 @@ Expression currentExpression = NEUTRAL;
 void setup()
 {
 
-  stripR.begin();
-  stripL.begin();
-  stripR.setBrightness(brightness);
-  stripL.setBrightness(brightness);
-  stripR.show(); // Initialize all pixels to 'off'
-  stripL.show(); // Initialize all pixels to 'off'
+  strip.begin();
+  strip.setBrightness(brightness);
+  strip.show(); // Initialize all pixels to 'off'
   try
   {
     pinMode(BUTTON1_PIN, INPUT_PULLUP);
@@ -183,11 +179,10 @@ void setShockedExpression()
     {
       int brightnessValue = random(0, 256);
       uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-      stripR.setPixelColor(i, ledColor);
-      stripL.setPixelColor(i, ledColor);
+      strip.setPixelColor(i, ledColor);
+      strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
     }
-    stripR.show();
-    stripL.show();
+    strip.show();
   }
   else
   {
@@ -206,10 +201,8 @@ void setErrorExpression()
   }
   else if (currentTime - expressionTimer < 500 + 500)
   {
-    stripR.clear();
-    stripL.clear();
-    stripR.show();
-    stripL.show();
+    strip.clear();
+    strip.show();
   }
   else
   {
@@ -224,10 +217,8 @@ void processLeds()
   switch (currentMode)
   {
   case OFF: // Turn off all LEDs
-    stripR.clear();
-    stripL.clear();
-    stripR.show();
-    stripL.show();
+    strip.clear();
+    strip.show();
     break;
 
   case ACTIVE:
@@ -238,6 +229,12 @@ void processLeds()
     // In manual mode, LEDs are controlled directly via web interface (not implemented here)
     break;
   case ERROR:
+    setErrorExpression();
+    break;
+  default:
+    strip.clear();
+    strip.show();
+    break;
   }
 }
 
@@ -248,11 +245,10 @@ void setLedsFromPattern(int pattern[])
   {
     int brightnessValue = pattern[i];
     uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    stripR.setPixelColor(i, ledColor);
-    stripL.setPixelColor(i, ledColor);
+    strip.setPixelColor(i, ledColor);
+    strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
   }
-  stripR.show();
-  stripL.show();
+  strip.show();
 }
 void setLedsFromPattern_Left(int pattern[])
 {
@@ -261,9 +257,9 @@ void setLedsFromPattern_Left(int pattern[])
   {
     int brightnessValue = pattern[i];
     uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    stripL.setPixelColor(i, ledColor);
+    strip.setPixelColor(i, ledColor);
   }
-  stripL.show();
+  strip.show();
 }
 void setLedsFromPattern_Right(int pattern[])
 {
@@ -272,9 +268,9 @@ void setLedsFromPattern_Right(int pattern[])
   {
     int brightnessValue = pattern[i];
     uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    stripR.setPixelColor(i, ledColor);
+    strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
   }
-  stripR.show();
+  strip.show();
 }
 
 int *lerpBetweenPatterns(int patternA[], int patternB[], float t)
@@ -286,15 +282,15 @@ int *lerpBetweenPatterns(int patternA[], int patternB[], float t)
   }
   return lerpedPattern;
 }
+
 int *getSymetricPattern(int pattern[])
 {
-  static int symmetricPattern[NEO_NUMPIXEL_PER];
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER / 2; i++)
+  static int symetricPattern[NEO_NUMPIXEL_PER];
+  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
-    symmetricPattern[i] = pattern[i];
-    symmetricPattern[NEO_NUMPIXEL_PER - 1 - i] = pattern[i];
+    symetricPattern[i] = pattern[NEO_NUMPIXEL_PER - 1 - i];
   }
-  return symmetricPattern;
+  return symetricPattern;
 }
 
 uint32_t getColorFromBrightness(int baseColor[], int brightness)
@@ -302,7 +298,7 @@ uint32_t getColorFromBrightness(int baseColor[], int brightness)
   int r = (baseColor[0] * brightness) / 255;
   int g = (baseColor[1] * brightness) / 255;
   int b = (baseColor[2] * brightness) / 255;
-  return stripR.Color(r, g, b);
+  return strip.Color(r, g, b);
 }
 
 // --- BUTTON HANDLING ---
