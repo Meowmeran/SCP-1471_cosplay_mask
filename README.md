@@ -24,3 +24,4 @@ Simplified and functional version of SCP-1471's face.
 - Keycard
 - SCP-420-J; wrap a piece of paper, burn the tip a little bit and put the fire out immediately.
 - Class-D Plushie
+- A SPEAKER, play various sound effects or even musics during your cosplay, as quiet as possible but don't make it inhearable
