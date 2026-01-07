@@ -8,7 +8,17 @@
 #define NEO_PIN 6           // Define pin for right side LEDs
 #define NEO_NUMPIXEL 32     // Number of LEDs per side
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
-Adafruit_NeoPixel strip(NEO_NUMPIXEL_PER, NEO_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip(NEO_NUMPIXEL, NEO_PIN, NEO_GRB + NEO_KHZ800);
+
+enum Orientation
+{
+  NORMAL,
+  ROTATED_90,
+  ROTATED_180,
+  ROTATED_270
+};
+Orientation currentOrientation_R = NORMAL;
+Orientation currentOrientation_L = NORMAL;
 
 int brightness = 50;
 int color[] = {255, 255, 255}; // Default color: white
@@ -91,34 +101,48 @@ void processExpressions()
     break;
   }
 }
-int errorPattern[NEO_NUMPIXEL_PER] = {255, 0, 0, 0,
-                                      0, 255, 0, 0,
-                                      0, 0, 255, 0,
-                                      0, 0, 0, 255};
-int neutralIdlePattern[NEO_NUMPIXEL_PER] = {0, 63, 63, 0,
-                                            63, 255, 255, 63,
-                                            63, 255, 255, 63,
-                                            0, 63, 63, 0};
-int neutralBlinkPattern[NEO_NUMPIXEL_PER] = {0, 0, 0, 0,
-                                             255, 255, 255, 255,
-                                             255, 255, 255, 255,
-                                             0, 0, 0, 0};
-int happyPattern[NEO_NUMPIXEL_PER] = {63, 255, 255, 63,
-                                      255, 63, 63, 255,
-                                      0, 0, 0, 0,
-                                      0, 0, 0, 0};
-int sadPattern[NEO_NUMPIXEL_PER] = {0, 0, 0, 0,
-                                    0, 0, 0, 0,
-                                    0, 63, 255, 255,
-                                    255, 255, 255, 63};
-int angryPattern[NEO_NUMPIXEL_PER] = {255, 63, 0, 0,
-                                      63, 255, 255, 63,
-                                      0, 0, 63, 255,
-                                      0, 0, 0, 0};
-int shockedPattern[NEO_NUMPIXEL_PER] = {0, 0, 0, 0,
-                                        0, 255, 63, 0,
-                                        0, 63, 63, 0,
-                                        0, 0, 0, 0};
+int errorPattern[NEO_NUMPIXEL_PER] = {
+  255, 0, 0, 0,
+  0, 255, 0, 0,
+  0, 0, 255, 0,
+  0, 0, 0, 255
+};
+int neutralIdlePattern[NEO_NUMPIXEL_PER] = {
+  0, 63, 63, 0,
+  63, 255, 255, 63,
+  63, 255, 255, 63,
+  0, 63, 63, 0
+};
+int neutralBlinkPattern[NEO_NUMPIXEL_PER] = {
+  0, 0, 0, 0,
+  255, 255, 255, 255,
+  255, 255, 255, 255,
+  0, 0, 0, 0
+};
+int happyPattern[NEO_NUMPIXEL_PER] = {
+  63, 255, 255, 63,
+  255, 63, 63, 255,
+  0, 0, 0, 0,
+  0, 0, 0, 0
+};
+int sadPattern[NEO_NUMPIXEL_PER] = {
+  0, 0, 0, 0,
+  0, 0, 0, 0,
+  0, 63, 255, 255,
+  255, 255, 255, 63
+};
+int angryPattern[NEO_NUMPIXEL_PER] = {
+  255, 63, 0, 0,
+  63, 255, 255, 63,
+  0, 0, 63, 255,
+  0, 0, 0, 0
+};
+int shockedPattern[NEO_NUMPIXEL_PER] = {
+  0, 0, 0, 0,
+  0, 255, 63, 0,
+  0, 63, 63, 0,
+  0, 0, 0, 0
+};
 
 const int neutralExpressionDuration = 5000;
 const int blinkDuration = 500;
@@ -156,7 +180,7 @@ void setNeutralExpression()
     expressionTimer = currentTime;
     currentPattern = neutralIdlePattern;
   }
-  setLedsFromPattern(currentPattern);
+  setLedsFromPattern(currentPattern, currentOrientation_L, currentOrientation_R);
 }
 
 void setHappyExpression()
@@ -168,7 +192,7 @@ void setHappyExpression()
     color[2] = 0;
   }
 
-  setLedsFromPattern(happyPattern);
+  setLedsFromPattern(happyPattern, currentOrientation_L, currentOrientation_R);
 }
 void setSadExpression()
 {
@@ -179,8 +203,8 @@ void setSadExpression()
     color[2] = 255;
   }
 
-  setLedsFromPattern_Left(sadPattern);
-  setLedsFromPattern_Right(getSymetricPattern(sadPattern));
+  setLedsFromPattern_Left(sadPattern, currentOrientation_L);
+  setLedsFromPattern_Right(getSymetricPattern(sadPattern), currentOrientation_R);
 }
 void setAngryExpression()
 {
@@ -190,8 +214,8 @@ void setAngryExpression()
     color[1] = 0;
     color[2] = 0;
   }
-  setLedsFromPattern_Left(angryPattern);
-  setLedsFromPattern_Right(getSymetricPattern(angryPattern));
+  setLedsFromPattern_Left(angryPattern, currentOrientation_L);
+  setLedsFromPattern_Right(getSymetricPattern(angryPattern), currentOrientation_R);
 }
 void setShockedExpression()
 {
@@ -226,7 +250,7 @@ void setErrorExpression()
   color[2] = 0;
   if (currentTime - expressionTimer < 500)
   {
-    setLedsFromPattern(errorPattern);
+    setLedsFromPattern(errorPattern, currentOrientation_L, currentOrientation_R);
   }
   else if (currentTime - expressionTimer < 500 + 500)
   {
@@ -267,20 +291,31 @@ void processLeds()
   }
 }
 
-void setLedsFromPattern(int pattern[])
+void setLedsFromPattern(int pattern[], Orientation currentOrientation_R, Orientation currentOrientation_L)
+
 {
+  int *correctedPattern = getCorrectedOrientation(pattern, currentOrientation_R);
+
   int adjustedColor = getColorFromBrightness(color, brightness);
   for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
-    int brightnessValue = pattern[i];
+    int brightnessValue = correctedPattern[i];
     uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
     strip.setPixelColor(i, ledColor);
+  }
+  correctedPattern = getCorrectedOrientation(pattern, currentOrientation_L);
+  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
+  {
+    int brightnessValue = correctedPattern[i];
+    uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
     strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
   }
+
   strip.show();
 }
-void setLedsFromPattern_Left(int pattern[])
+void setLedsFromPattern_Left(int pattern[], Orientation currentOrientation_L = NORMAL)
 {
+  pattern = getCorrectedOrientation(pattern, currentOrientation_L);
   uint32_t adjustedColor = getColorFromBrightness(color, brightness);
   for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
@@ -290,8 +325,9 @@ void setLedsFromPattern_Left(int pattern[])
   }
   strip.show();
 }
-void setLedsFromPattern_Right(int pattern[])
+void setLedsFromPattern_Right(int pattern[], Orientation currentOrientation_R = NORMAL)
 {
+  pattern = getCorrectedOrientation(pattern, currentOrientation_R);
   uint32_t adjustedColor = getColorFromBrightness(color, brightness);
   for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
@@ -312,15 +348,52 @@ int *lerpBetweenPatterns(int patternA[], int patternB[], float t)
   return lerpedPattern;
 }
 
-int *getSymetricPattern(int pattern[]) {
+int *getSymetricPattern(int pattern[], Orientation orientation = NORMAL)
+{
+  pattern = getCorrectedOrientation(pattern, orientation);
   static int symetricPattern[NEO_NUMPIXEL_PER];
-  for (int row = 0; row < 4; row++) {
-    for (int col = 0; col < 4; col++) {
+  for (int row = 0; row < 4; row++)
+  {
+    for (int col = 0; col < 4; col++)
+    {
       // Mirror columns: 0->3, 1->2, 2->1, 3->0
       symetricPattern[row * 4 + col] = pattern[row * 4 + (3 - col)];
     }
   }
   return symetricPattern;
+}
+
+int *getCorrectedOrientation(int pattern[], Orientation orientation = NORMAL)
+{
+  static int correctedPattern[NEO_NUMPIXEL_PER];
+  for (int row = 0; row < 4; row++)
+  {
+    for (int col = 0; col < 4; col++)
+    {
+      int newRow, newCol;
+      switch (orientation)
+      {
+      case NORMAL:
+        newRow = row;
+        newCol = col;
+        break;
+      case ROTATED_90:
+        newRow = col;
+        newCol = 3 - row;
+        break;
+      case ROTATED_180:
+        newRow = 3 - row;
+        newCol = 3 - col;
+        break;
+      case ROTATED_270:
+        newRow = 3 - col;
+        newCol = row;
+        break;
+      }
+      correctedPattern[newRow * 4 + newCol] = pattern[row * 4 + col];
+    }
+  }
+  return correctedPattern;
 }
 
 uint32_t getColorFromBrightness(int baseColor[], int brightness)
