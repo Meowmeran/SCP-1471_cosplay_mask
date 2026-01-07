@@ -16,3 +16,5 @@ Simplified and functional version of SCP-1471's face.
 - Wires
   
 ![Circuit Sketch](https://github.com/Meowmeran/SCP-1471_cosplay_mask/blob/main/circuit_sketch.png)
+
+![Blender Image](https://github.com/Meowmeran/SCP-1471_cosplay_mask/blob/main/blender_2MJ3qowMTs.png)
