@@ -18,3 +18,9 @@ Simplified and functional version of SCP-1471's face.
 ![Circuit Sketch](https://github.com/Meowmeran/SCP-1471_cosplay_mask/blob/main/circuit_sketch.png)
 
 ![Blender Image](https://github.com/Meowmeran/SCP-1471_cosplay_mask/blob/main/blender_2MJ3qowMTs.png)
+
+### Additional props to create to give the SCP-1471 impression:
+- SCP-207, simple as bringing a bottle of coca-cola.
+- Keycard
+- SCP-420-J; wrap a piece of paper, burn the tip a little bit and put the fire out immediately.
+- Class-D Plushie
