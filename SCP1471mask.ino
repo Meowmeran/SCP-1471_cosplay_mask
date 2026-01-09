@@ -1,11 +1,11 @@
 #include <Arduino.h>
 #include "Adafruit_NeoPixel.h"
 
-#define BUTTON1_PIN 2
-#define BUTTON2_PIN 3
-#define BUTTON3_PIN 4 // not touch sensor, will be hidden for necessarry functions
+#define BUTTON1_PIN D5
+#define BUTTON2_PIN D6
+#define BUTTON3_PIN D7 // not touch sensor, will be hidden for necessarry functions
 
-#define NEO_PIN 6           // Define pin for right side LEDs
+#define NEO_PIN D4          // Define pin for right side LEDs
 #define NEO_NUMPIXEL 32     // Number of LEDs per side
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
 Adafruit_NeoPixel strip(NEO_NUMPIXEL, NEO_PIN, NEO_GRB + NEO_KHZ800);
@@ -76,7 +76,7 @@ void loop()
 
 // --- EXPRESSION PROCESSING ---
 
-int expressionTimer = 0;
+unsigned expressionTimer = 0;
 void processExpressions()
 {
   switch (currentExpression)
@@ -102,47 +102,40 @@ void processExpressions()
   }
 }
 int errorPattern[NEO_NUMPIXEL_PER] = {
-  255, 0, 0, 0,
-  0, 255, 0, 0,
-  0, 0, 255, 0,
-  0, 0, 0, 255
-};
+    255, 0, 0, 0,
+    0, 255, 0, 0,
+    0, 0, 255, 0,
+    0, 0, 0, 255};
 int neutralIdlePattern[NEO_NUMPIXEL_PER] = {
-  0, 63, 63, 0,
-  63, 255, 255, 63,
-  63, 255, 255, 63,
-  0, 63, 63, 0
-};
+    0, 63, 63, 0,
+    63, 255, 255, 63,
+    63, 255, 255, 63,
+    0, 63, 63, 0};
 int neutralBlinkPattern[NEO_NUMPIXEL_PER] = {
-  0, 0, 0, 0,
-  255, 255, 255, 255,
-  255, 255, 255, 255,
-  0, 0, 0, 0
-};
+    0, 0, 0, 0,
+    255, 255, 255, 255,
+    255, 255, 255, 255,
+    0, 0, 0, 0};
 int happyPattern[NEO_NUMPIXEL_PER] = {
-  63, 255, 255, 63,
-  255, 63, 63, 255,
-  0, 0, 0, 0,
-  0, 0, 0, 0
-};
+    63, 255, 255, 63,
+    255, 63, 63, 255,
+    0, 0, 0, 0,
+    0, 0, 0, 0};
 int sadPattern[NEO_NUMPIXEL_PER] = {
-  0, 0, 0, 0,
-  0, 0, 0, 0,
-  0, 63, 255, 255,
-  255, 255, 255, 63
-};
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 63, 255, 255,
+    255, 255, 255, 63};
 int angryPattern[NEO_NUMPIXEL_PER] = {
-  255, 63, 0, 0,
-  63, 255, 255, 63,
-  0, 0, 63, 255,
-  0, 0, 0, 0
-};
+    255, 63, 0, 0,
+    63, 255, 255, 63,
+    0, 0, 63, 255,
+    0, 0, 0, 0};
 int shockedPattern[NEO_NUMPIXEL_PER] = {
-  0, 0, 0, 0,
-  0, 255, 63, 0,
-  0, 63, 63, 0,
-  0, 0, 0, 0
-};
+    0, 0, 0, 0,
+    0, 255, 63, 0,
+    0, 63, 63, 0,
+    0, 0, 0, 0};
 
 const int neutralExpressionDuration = 5000;
 const int blinkDuration = 500;
@@ -155,8 +148,7 @@ void setNeutralExpression()
     color[2] = 255;
   }
 
-  uint32_t adjustedColor = getColorFromBrightness(color, brightness);
-  int currentTime = millis();
+  unsigned currentTime = millis();
   int *currentPattern;
   if (currentTime - expressionTimer < neutralExpressionDuration)
   {
@@ -296,7 +288,6 @@ void setLedsFromPattern(int pattern[], Orientation currentOrientation_R, Orienta
 {
   int *correctedPattern = getCorrectedOrientation(pattern, currentOrientation_R);
 
-  int adjustedColor = getColorFromBrightness(color, brightness);
   for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
     int brightnessValue = correctedPattern[i];
@@ -316,7 +307,6 @@ void setLedsFromPattern(int pattern[], Orientation currentOrientation_R, Orienta
 void setLedsFromPattern_Left(int pattern[], Orientation currentOrientation_L = NORMAL)
 {
   pattern = getCorrectedOrientation(pattern, currentOrientation_L);
-  uint32_t adjustedColor = getColorFromBrightness(color, brightness);
   for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
     int brightnessValue = pattern[i];
@@ -328,7 +318,6 @@ void setLedsFromPattern_Left(int pattern[], Orientation currentOrientation_L = N
 void setLedsFromPattern_Right(int pattern[], Orientation currentOrientation_R = NORMAL)
 {
   pattern = getCorrectedOrientation(pattern, currentOrientation_R);
-  uint32_t adjustedColor = getColorFromBrightness(color, brightness);
   for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
   {
     int brightnessValue = pattern[i];
@@ -406,176 +395,180 @@ uint32_t getColorFromBrightness(int baseColor[], int brightness)
 
 // --- BUTTON HANDLING ---
 
-unsigned long button1PressTime = 0;
-unsigned long button2PressTime = 0;
-unsigned long button3PressTime = 0;
-unsigned long button1LastEventTime = 0;
-unsigned long button2LastEventTime = 0;
-unsigned long button3LastEventTime = 0;
-const unsigned long doubleTapWindow = 300;
-const unsigned long holdThreshold = 1000;
-const unsigned long holdDebounce = 200;
-bool button1Held = false;
-bool button2Held = false;
-bool button3Held = false;
+struct ButtonHandler
+{
+  static const unsigned long DOUBLE_TAP_WINDOW = 300;
+  static const unsigned long HOLD_THRESHOLD = 1000;
+  static const unsigned long TAP_EXPIRY = 250;
+
+  unsigned long pressTime = 0;
+  unsigned long lastEventTime = 0;
+  bool tapPending = false;
+  bool isHeld = false;
+
+  void update(bool pressed)
+  {
+    unsigned long currentTime = millis();
+
+    if (pressed && pressTime == 0)
+    {
+      pressTime = currentTime;
+      isHeld = false;
+    }
+    else if (!pressed && pressTime != 0)
+    {
+      unsigned long duration = currentTime - pressTime;
+
+      if (duration < HOLD_THRESHOLD && !isHeld)
+      {
+        if (currentTime - lastEventTime < DOUBLE_TAP_WINDOW)
+        {
+          onDoubleTap();
+          lastEventTime = 0;
+        }
+        else
+        {
+          onTap();
+          tapPending = true;
+          lastEventTime = currentTime;
+        }
+      }
+      pressTime = 0;
+      isHeld = false;
+    }
+    else if (pressed && !isHeld && currentTime - pressTime >= HOLD_THRESHOLD)
+    {
+      onHold();
+      isHeld = true;
+    }
+  }
+
+  bool consumeTap()
+  {
+    if (!tapPending)
+      return false;
+    if ((millis() - lastEventTime) <= TAP_EXPIRY)
+    {
+      tapPending = false;
+      return true;
+    }
+    tapPending = false; // Expired
+    return false;
+  }
+
+  bool isTapped() const { return tapPending; }
+  bool isCurrentlyHeld() const { return isHeld; }
+
+  virtual void onTap() {}
+  virtual void onDoubleTap() {}
+  virtual void onHold() {}
+};
+
+class Button1Handler : public ButtonHandler
+{
+  void onTap() override
+  {
+    // Reserved for future use
+  }
+
+  void onDoubleTap() override
+  {
+    // Reserved for future use
+  }
+
+  void onHold() override
+  {
+    // Reserved for combinations
+  }
+};
+
+class Button2Handler : public ButtonHandler
+{
+  void onTap() override
+  {
+    // Reserved for future use
+  }
+
+  void onDoubleTap() override
+  {
+    // Reserved for future use
+  }
+
+  void onHold() override
+  {
+    // Reserved for combinations
+  }
+};
+
+class Button3Handler : public ButtonHandler
+{
+  void onTap() override
+  {
+    // Reserved for future use
+  }
+
+  void onDoubleTap() override
+  {
+    // Reserved for future use
+  }
+
+  void onHold() override
+  {
+    // Reserved for future use
+  }
+};
+
+Button1Handler button1;
+Button2Handler button2;
+Button3Handler button3;
+
+struct ButtonCombinationHandler
+{
+  ButtonHandler &buttonA;
+  ButtonHandler &buttonB;
+
+  ButtonCombinationHandler(ButtonHandler &a, ButtonHandler &b) : buttonA(a), buttonB(b) {}
+
+  void update()
+  {
+    if (buttonA.isCurrentlyHeld() && !buttonB.consumeTap())
+    {
+      on_A_Held();
+    }
+    if (buttonB.isCurrentlyHeld() && !buttonA.consumeTap())
+    {
+      on_B_Held();
+    }
+    if (buttonA.isCurrentlyHeld() && buttonB.isCurrentlyHeld())
+    {
+      onBothHeld();
+    }
+  }
+
+  virtual void onBothHeld() {}
+  virtual void on_A_Held() {}
+  virtual void on_B_Held() {}
+};
+
+class Button1And2Handler : public ButtonCombinationHandler
+{
+public:
+  Button1And2Handler(ButtonHandler &a, ButtonHandler &b) : ButtonCombinationHandler(a, b) {}
+
+  void onBothHeld() override
+  {
+    togglePersistentColor();
+  }
+};
+
+Button1And2Handler button1And2(button1, button2);
 
 void handleButtons()
 {
-  handleButton1();
-  handleButton2();
-  handleButton3();
-}
-
-void handleButton1()
-{
-  unsigned long currentTime = millis();
-  bool pressed = digitalRead(BUTTON1_PIN) == LOW;
-
-  if (pressed && button1PressTime == 0)
-  {
-    button1PressTime = currentTime;
-    button1Held = false;
-  }
-  else if (!pressed && button1PressTime != 0)
-  {
-    unsigned long pressDuration = currentTime - button1PressTime;
-
-    if (pressDuration < holdThreshold)
-    {
-      if (currentTime - button1LastEventTime < doubleTapWindow)
-      {
-        onButton1DoubleTap();
-        button1LastEventTime = 0;
-      }
-      else
-      {
-        onButton1Tap();
-        button1LastEventTime = currentTime;
-      }
-    }
-    button1PressTime = 0;
-    button1Held = false;
-  }
-  else if (pressed && !button1Held && currentTime - button1PressTime >= holdThreshold)
-  {
-    onButton1Hold();
-    button1Held = true;
-  }
-}
-
-void handleButton2()
-{
-  unsigned long currentTime = millis();
-  bool pressed = digitalRead(BUTTON2_PIN) == LOW;
-
-  if (pressed && button2PressTime == 0)
-  {
-    button2PressTime = currentTime;
-    button2Held = false;
-  }
-  else if (!pressed && button2PressTime != 0)
-  {
-    unsigned long pressDuration = currentTime - button2PressTime;
-
-    if (pressDuration < holdThreshold)
-    {
-      if (currentTime - button2LastEventTime < doubleTapWindow)
-      {
-        onButton2DoubleTap();
-        button2LastEventTime = 0;
-      }
-      else
-      {
-        onButton2Tap();
-        button2LastEventTime = currentTime;
-      }
-    }
-    button2PressTime = 0;
-    button2Held = false;
-  }
-  else if (pressed && !button2Held && currentTime - button2PressTime >= holdThreshold)
-  {
-    onButton2Hold();
-    button2Held = true;
-  }
-}
-
-void handleButton3()
-{
-  unsigned long currentTime = millis();
-  bool pressed = digitalRead(BUTTON3_PIN) == LOW;
-
-  if (pressed && button3PressTime == 0)
-  {
-    button3PressTime = currentTime;
-    button3Held = false;
-  }
-  else if (!pressed && button3PressTime != 0)
-  {
-    unsigned long pressDuration = currentTime - button3PressTime;
-
-    if (pressDuration < holdThreshold)
-    {
-      if (currentTime - button3LastEventTime < doubleTapWindow)
-      {
-        onButton3DoubleTap();
-        button3LastEventTime = 0;
-      }
-      else
-      {
-        onButton3Tap();
-        button3LastEventTime = currentTime;
-      }
-    }
-    button3PressTime = 0;
-    button3Held = false;
-  }
-  else if (pressed && !button3Held && currentTime - button3PressTime >= holdThreshold)
-  {
-    onButton3Hold();
-    button3Held = true;
-  }
-}
-
-// Button events
-void onButton1Tap()
-{
-  if (expressionPreSelection)
-  {
-    selectExpression(nextExpression);
-    expressionPreSelection = false;
-  }
-  else
-  {
-    cycleExpression();
-  }
-}
-void onButton1DoubleTap()
-{
-}
-void onButton1Hold()
-{
-  expressionPreSelectToggle();
-}
-void onButton2Tap()
-{
-  cycleExpression();
-}
-void onButton2DoubleTap()
-{
-}
-void onButton2Hold()
-{
-  cycleMode();
-}
-void onButton3Tap()
-{
-}
-void onButton3DoubleTap()
-{
-}
-void onButton3Hold()
-{
+  button1.update(digitalRead(BUTTON1_PIN) == LOW);
+  button2.update(digitalRead(BUTTON2_PIN) == LOW);
+  button3.update(digitalRead(BUTTON3_PIN) == LOW);
+  button1And2.update();
 }
 
 // helpers
@@ -629,7 +622,6 @@ void togglePersistentColor()
 {
   persistentColor = !persistentColor;
 }
-
 /*
 0 1 2 3
 4 5 6 7
