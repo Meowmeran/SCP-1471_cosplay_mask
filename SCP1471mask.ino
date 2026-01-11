@@ -1,5 +1,11 @@
 #include <Arduino.h>
 #include "Adafruit_NeoPixel.h"
+#include "Input/ButtonHandler.h"
+#include "Led/LedController.h"
+#include "Led/Expressions.h"
+#include "Math/Orientation.h"
+#include "Core/ModeManager.h"
+#include "Core/ExpressionManager.h"
 
 #define BUTTON1_PIN D5
 #define BUTTON2_PIN D6
@@ -8,623 +14,158 @@
 #define NEO_PIN D4          // Define pin for right side LEDs
 #define NEO_NUMPIXEL 32     // Number of LEDs per side
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
-Adafruit_NeoPixel strip(NEO_NUMPIXEL, NEO_PIN, NEO_GRB + NEO_KHZ800);
 
-enum Orientation
-{
-  NORMAL,
-  ROTATED_90,
-  ROTATED_180,
-  ROTATED_270
-};
-Orientation currentOrientation_R = NORMAL;
-Orientation currentOrientation_L = NORMAL;
+// Global instances
+ButtonHandler buttonHandler(300, 700); // 300ms for double tap, 700ms for hold
+MaskFrame frame = MaskFrame();
+Core::ModeManager modeManager = Core::ModeManager();
+Core::ExpressionManager expressionManager = Core::ExpressionManager(&frame);
+LedController ledController = LedController(NEO_PIN, NEO_NUMPIXEL * 2);
 
-int brightness = 50;
-int color[] = {255, 255, 255}; // Default color: white
-bool persistentColor = false;
-
-// Different operational modes for the cosplay mask
-enum Mode
-{
-  OFF,
-  ACTIVE,
-  MANUAL,
-  ERROR,
-  Mode_COUNT
-};
-Mode currentMode = OFF;
-
-// Various facial expressions that will be represented by LED patterns
-enum Expression
-{
-  NEUTRAL,
-  HAPPY,
-  SAD,
-  ANGRY,
-  SHOCKED,
-  Expression_COUNT
-};
-Expression currentExpression = NEUTRAL;
-Expression nextExpression = NEUTRAL;
-bool expressionPreSelection = false;
+// Forward declarations
+void onButton1Tap();
+void onButton1DoubleTap();
+void onButton1Hold();
+void onButton2Tap();
+void onButton2DoubleTap();
+void onButton2Hold();
+void onButton3Tap();
+void onButton3DoubleTap();
+void onButton3Hold();
 
 void setup()
 {
+  Serial.begin(115200);
 
-  if (strip.begin())
-  {
-    Serial.println("NeoPixel strip initialized.");
-  }
-  else
-  {
-    Serial.println("Failed to initialize NeoPixel strip!");
-  }
+  // Initialize button handler with pins
+  buttonHandler.begin(BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN);
 
-  strip.setBrightness(brightness);
-  strip.show(); // Initialize all pixels to 'off'
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
-  pinMode(BUTTON3_PIN, INPUT_PULLUP);
+  // Register button actions
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Tap, onButton1Tap);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton1DoubleTap);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Hold, onButton1Hold);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Tap, onButton2Tap);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton2DoubleTap);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Hold, onButton2Hold);
+  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Tap, onButton3Tap);
+  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton3DoubleTap);
+  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Hold, onButton3Hold);
+
+  ledController.begin();
+
+  frame.clear();
 }
+
+unsigned long lastUpdate = 0;
 
 void loop()
 {
-  processLeds();
-  handleButtons();
-}
+  unsigned long currentTime = millis();
+  uint32_t deltaTime = currentTime - lastUpdate; // Time since last update
+  lastUpdate = currentTime;
 
-// --- EXPRESSION PROCESSING ---
-
-unsigned expressionTimer = 0;
-void processExpressions()
-{
-  switch (currentExpression)
+  switch (modeManager.getMode())
   {
-  case NEUTRAL:
-    setNeutralExpression();
+  case Core::Mode::OFF:
+    frame.clear();
     break;
-  case HAPPY:
-    setHappyExpression();
+  case Core::Mode::ACTIVE:
+    expressionManager.updateFrame();
     break;
-  case SAD:
-    setSadExpression();
+  case Core::Mode::MANUAL:
+    // In manual mode, expression is controlled by button actions
     break;
-  case ANGRY:
-    setAngryExpression();
-    break;
-  case SHOCKED:
-    setShockedExpression();
+  case Core::Mode::ERROR:
+    ledController.present(getErrorFrame());
     break;
   default:
-    setNeutralExpression();
+    expressionManager.setExpression(Expressions::Type::Neutral);
     break;
   }
-}
-int errorPattern[NEO_NUMPIXEL_PER] = {
-    255, 0, 0, 0,
-    0, 255, 0, 0,
-    0, 0, 255, 0,
-    0, 0, 0, 255};
-int neutralIdlePattern[NEO_NUMPIXEL_PER] = {
-    0, 63, 63, 0,
-    63, 255, 255, 63,
-    63, 255, 255, 63,
-    0, 63, 63, 0};
-int neutralBlinkPattern[NEO_NUMPIXEL_PER] = {
-    0, 0, 0, 0,
-    255, 255, 255, 255,
-    255, 255, 255, 255,
-    0, 0, 0, 0};
-int happyPattern[NEO_NUMPIXEL_PER] = {
-    63, 255, 255, 63,
-    255, 63, 63, 255,
-    0, 0, 0, 0,
-    0, 0, 0, 0};
-int sadPattern[NEO_NUMPIXEL_PER] = {
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 63, 255, 255,
-    255, 255, 255, 63};
-int angryPattern[NEO_NUMPIXEL_PER] = {
-    255, 63, 0, 0,
-    63, 255, 255, 63,
-    0, 0, 63, 255,
-    0, 0, 0, 0};
-int shockedPattern[NEO_NUMPIXEL_PER] = {
-    0, 0, 0, 0,
-    0, 255, 63, 0,
-    0, 63, 63, 0,
-    0, 0, 0, 0};
+  buttonHandler.update(deltaTime);
+  ledController.present(frame);
 
-const int neutralExpressionDuration = 5000;
-const int blinkDuration = 500;
-void setNeutralExpression()
-{
-  if (!persistentColor)
-  {
-    color[0] = 255;
-    color[1] = 255;
-    color[2] = 255;
-  }
-
-  unsigned currentTime = millis();
-  int *currentPattern;
-  if (currentTime - expressionTimer < neutralExpressionDuration)
-  {
-    currentPattern = neutralIdlePattern;
-  }
-  else if (currentTime - expressionTimer < neutralExpressionDuration + blinkDuration)
-  {
-    if (currentTime - expressionTimer < neutralExpressionDuration + blinkDuration / 2)
-    {
-      float t = float(currentTime - (expressionTimer + neutralExpressionDuration)) / (blinkDuration / 2);
-      currentPattern = lerpBetweenPatterns(neutralIdlePattern, neutralBlinkPattern, t);
-    }
-    else
-    {
-      float t = float(currentTime - (expressionTimer + neutralExpressionDuration + blinkDuration / 2)) / (blinkDuration / 2);
-      currentPattern = lerpBetweenPatterns(neutralBlinkPattern, neutralIdlePattern, t);
-    }
-  }
-  else
-  {
-    expressionTimer = currentTime;
-    currentPattern = neutralIdlePattern;
-  }
-  setLedsFromPattern(currentPattern, currentOrientation_L, currentOrientation_R);
+  delay(10); // Small delay for stability
 }
 
-void setHappyExpression()
-{
-  if (!persistentColor)
-  {
-    color[0] = 255;
-    color[1] = 255;
-    color[2] = 0;
-  }
+// --- BUTTON ACTION HANDLERS ---
 
-  setLedsFromPattern(happyPattern, currentOrientation_L, currentOrientation_R);
-}
-void setSadExpression()
+void onButton1Tap()
 {
-  if (!persistentColor)
-  {
-    color[0] = 0;
-    color[1] = 50;
-    color[2] = 255;
-  }
-
-  setLedsFromPattern_Left(sadPattern, currentOrientation_L);
-  setLedsFromPattern_Right(getSymetricPattern(sadPattern), currentOrientation_R);
-}
-void setAngryExpression()
-{
-  if (!persistentColor)
-  {
-    color[0] = 255;
-    color[1] = 0;
-    color[2] = 0;
-  }
-  setLedsFromPattern_Left(angryPattern, currentOrientation_L);
-  setLedsFromPattern_Right(getSymetricPattern(angryPattern), currentOrientation_R);
-}
-void setShockedExpression()
-{
-  if (!persistentColor)
-  {
-    color[0] = 255;
-    color[1] = 255;
-    color[2] = 255;
-  }
-  int currentTime = millis();
-  if (currentTime - expressionTimer < 500)
-  {
-    for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-    {
-      int brightnessValue = random(0, 256);
-      uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-      strip.setPixelColor(i, ledColor);
-      strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
-    }
-    strip.show();
-  }
-  else
-  {
-    expressionTimer = currentTime;
-  }
-}
-void setErrorExpression()
-{
-  int currentTime = millis();
-  color[0] = 255;
-  color[1] = 0;
-  color[2] = 0;
-  if (currentTime - expressionTimer < 500)
-  {
-    setLedsFromPattern(errorPattern, currentOrientation_L, currentOrientation_R);
-  }
-  else if (currentTime - expressionTimer < 500 + 500)
-  {
-    strip.clear();
-    strip.show();
-  }
-  else
-  {
-    expressionTimer = currentTime;
-  }
+  Serial.println("Button 1: Tap");
+  cycleMode();
 }
 
-// --- LED PROCESSING ---
-
-void processLeds()
+void onButton1DoubleTap()
 {
-  switch (currentMode)
-  {
-  case OFF: // Turn off all LEDs
-    strip.clear();
-    strip.show();
-    break;
-
-  case ACTIVE:
-    processExpressions();
-    break;
-
-  case MANUAL:
-    // In manual mode, LEDs are controlled directly via web interface (not implemented here)
-    break;
-  case ERROR:
-    setErrorExpression();
-    break;
-  default:
-    strip.clear();
-    strip.show();
-    break;
-  }
+  Serial.println("Button 1: Double Tap");
+  // Add your double tap action here
 }
 
-void setLedsFromPattern(int pattern[], Orientation currentOrientation_R, Orientation currentOrientation_L)
-
+void onButton1Hold()
 {
-  int *correctedPattern = getCorrectedOrientation(pattern, currentOrientation_R);
-
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-  {
-    int brightnessValue = correctedPattern[i];
-    uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    strip.setPixelColor(i, ledColor);
-  }
-  correctedPattern = getCorrectedOrientation(pattern, currentOrientation_L);
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-  {
-    int brightnessValue = correctedPattern[i];
-    uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
-  }
-
-  strip.show();
-}
-void setLedsFromPattern_Left(int pattern[], Orientation currentOrientation_L = NORMAL)
-{
-  pattern = getCorrectedOrientation(pattern, currentOrientation_L);
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-  {
-    int brightnessValue = pattern[i];
-    uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    strip.setPixelColor(i, ledColor);
-  }
-  strip.show();
-}
-void setLedsFromPattern_Right(int pattern[], Orientation currentOrientation_R = NORMAL)
-{
-  pattern = getCorrectedOrientation(pattern, currentOrientation_R);
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-  {
-    int brightnessValue = pattern[i];
-    uint32_t ledColor = getColorFromBrightness(color, brightnessValue);
-    strip.setPixelColor(i + NEO_NUMPIXEL_PER, ledColor);
-  }
-  strip.show();
+  Serial.println("Button 1: Hold");
 }
 
-int *lerpBetweenPatterns(int patternA[], int patternB[], float t)
+void onButton2Tap()
 {
-  static int lerpedPattern[NEO_NUMPIXEL_PER];
-  for (size_t i = 0; i < NEO_NUMPIXEL_PER; i++)
-  {
-    lerpedPattern[i] = (1 - t) * patternA[i] + t * patternB[i];
-  }
-  return lerpedPattern;
+  Serial.println("Button 2: Tap");
+  cycleBrightness();
 }
 
-int *getSymetricPattern(int pattern[], Orientation orientation = NORMAL)
+void onButton2DoubleTap()
 {
-  pattern = getCorrectedOrientation(pattern, orientation);
-  static int symetricPattern[NEO_NUMPIXEL_PER];
-  for (int row = 0; row < 4; row++)
-  {
-    for (int col = 0; col < 4; col++)
-    {
-      // Mirror columns: 0->3, 1->2, 2->1, 3->0
-      symetricPattern[row * 4 + col] = pattern[row * 4 + (3 - col)];
-    }
-  }
-  return symetricPattern;
+  Serial.println("Button 2: Double Tap");
+  // Add your button 2 double tap action here
+}
+void onButton2Hold()
+{
+  Serial.println("Button 2: Hold");
+  // Add your button 2 hold action here
 }
 
-int *getCorrectedOrientation(int pattern[], Orientation orientation = NORMAL)
+void onButton3Tap()
 {
-  static int correctedPattern[NEO_NUMPIXEL_PER];
-  for (int row = 0; row < 4; row++)
-  {
-    for (int col = 0; col < 4; col++)
-    {
-      int newRow, newCol;
-      switch (orientation)
-      {
-      case NORMAL:
-        newRow = row;
-        newCol = col;
-        break;
-      case ROTATED_90:
-        newRow = col;
-        newCol = 3 - row;
-        break;
-      case ROTATED_180:
-        newRow = 3 - row;
-        newCol = 3 - col;
-        break;
-      case ROTATED_270:
-        newRow = 3 - col;
-        newCol = row;
-        break;
-      }
-      correctedPattern[newRow * 4 + newCol] = pattern[row * 4 + col];
-    }
-  }
-  return correctedPattern;
+  Serial.println("Button 3: Tap");
+  // Add your button 3 action here
+}
+void onButton3DoubleTap()
+{
+  Serial.println("Button 3: Double Tap");
+  // Add your button 3 double tap action here
+}
+void onButton3Hold()
+{
+  Serial.println("Button 3: Hold");
+  // Add your button 3 hold action here
 }
 
-uint32_t getColorFromBrightness(int baseColor[], int brightness)
-{
-  int r = (baseColor[0] * brightness) / 255;
-  int g = (baseColor[1] * brightness) / 255;
-  int b = (baseColor[2] * brightness) / 255;
-  return strip.Color(r, g, b);
-}
-
-// --- BUTTON HANDLING ---
-
-struct ButtonHandler
-{
-  static const unsigned long DOUBLE_TAP_WINDOW = 300;
-  static const unsigned long HOLD_THRESHOLD = 1000;
-  static const unsigned long TAP_EXPIRY = 250;
-
-  unsigned long pressTime = 0;
-  unsigned long lastEventTime = 0;
-  bool tapPending = false;
-  bool isHeld = false;
-
-  void update(bool pressed)
-  {
-    unsigned long currentTime = millis();
-
-    if (pressed && pressTime == 0)
-    {
-      pressTime = currentTime;
-      isHeld = false;
-    }
-    else if (!pressed && pressTime != 0)
-    {
-      unsigned long duration = currentTime - pressTime;
-
-      if (duration < HOLD_THRESHOLD && !isHeld)
-      {
-        if (currentTime - lastEventTime < DOUBLE_TAP_WINDOW)
-        {
-          onDoubleTap();
-          lastEventTime = 0;
-        }
-        else
-        {
-          onTap();
-          tapPending = true;
-          lastEventTime = currentTime;
-        }
-      }
-      pressTime = 0;
-      isHeld = false;
-    }
-    else if (pressed && !isHeld && currentTime - pressTime >= HOLD_THRESHOLD)
-    {
-      onHold();
-      isHeld = true;
-    }
-  }
-
-  bool consumeTap()
-  {
-    if (!tapPending)
-      return false;
-    if ((millis() - lastEventTime) <= TAP_EXPIRY)
-    {
-      tapPending = false;
-      return true;
-    }
-    tapPending = false; // Expired
-    return false;
-  }
-
-  bool isTapped() const { return tapPending; }
-  bool isCurrentlyHeld() const { return isHeld; }
-
-  virtual void onTap() {}
-  virtual void onDoubleTap() {}
-  virtual void onHold() {}
-};
-
-class Button1Handler : public ButtonHandler
-{
-  void onTap() override
-  {
-    // Reserved for future use
-  }
-
-  void onDoubleTap() override
-  {
-    // Reserved for future use
-  }
-
-  void onHold() override
-  {
-    // Reserved for combinations
-  }
-};
-
-class Button2Handler : public ButtonHandler
-{
-  void onTap() override
-  {
-    // Reserved for future use
-  }
-
-  void onDoubleTap() override
-  {
-    // Reserved for future use
-  }
-
-  void onHold() override
-  {
-    // Reserved for combinations
-  }
-};
-
-class Button3Handler : public ButtonHandler
-{
-  void onTap() override
-  {
-    // Reserved for future use
-  }
-
-  void onDoubleTap() override
-  {
-    // Reserved for future use
-  }
-
-  void onHold() override
-  {
-    // Reserved for future use
-  }
-};
-
-Button1Handler button1;
-Button2Handler button2;
-Button3Handler button3;
-
-struct ButtonCombinationHandler
-{
-  ButtonHandler &buttonA;
-  ButtonHandler &buttonB;
-
-  ButtonCombinationHandler(ButtonHandler &a, ButtonHandler &b) : buttonA(a), buttonB(b) {}
-
-  void update()
-  {
-    if (buttonA.isCurrentlyHeld() && !buttonB.consumeTap())
-    {
-      on_A_Held();
-    }
-    if (buttonB.isCurrentlyHeld() && !buttonA.consumeTap())
-    {
-      on_B_Held();
-    }
-    if (buttonA.isCurrentlyHeld() && buttonB.isCurrentlyHeld())
-    {
-      onBothHeld();
-    }
-  }
-
-  virtual void onBothHeld() {}
-  virtual void on_A_Held() {}
-  virtual void on_B_Held() {}
-};
-
-class Button1And2Handler : public ButtonCombinationHandler
-{
-public:
-  Button1And2Handler(ButtonHandler &a, ButtonHandler &b) : ButtonCombinationHandler(a, b) {}
-
-  void onBothHeld() override
-  {
-    togglePersistentColor();
-  }
-};
-
-Button1And2Handler button1And2(button1, button2);
-
-void handleButtons()
-{
-  button1.update(digitalRead(BUTTON1_PIN) == LOW);
-  button2.update(digitalRead(BUTTON2_PIN) == LOW);
-  button3.update(digitalRead(BUTTON3_PIN) == LOW);
-  button1And2.update();
-}
-
-// helpers
+// --- HELPER FUNCTIONS ---
 void cycleMode()
 {
-  switch (currentMode)
+  switch (modeManager.getMode())
   {
-  case OFF:
-    currentMode = ACTIVE;
+  case Core::Mode::OFF:
+    modeManager.setMode(Core::Mode::ACTIVE);
     break;
-  case ACTIVE:
-    currentMode = MANUAL;
+  case Core::Mode::ACTIVE:
+    modeManager.setMode(Core::Mode::MANUAL);
     break;
-  case MANUAL:
-    currentMode = OFF;
+  case Core::Mode::MANUAL:
+    modeManager.setMode(Core::Mode::OFF);
     break;
   default:
-    currentMode = OFF;
+    modeManager.setMode(Core::Mode::OFF);
     break;
   }
-}
-
-void cycleExpression()
-{
-  currentExpression = (Expression)((currentExpression + 1) % Expression_COUNT);
 }
 
 void cycleBrightness()
 {
-  brightness += 51;
-  if (brightness > 255)
-    brightness = 0;
+  uint8_t step = 51; // 20% of 255
+  uint8_t brightness = ledController.getBrightness();
+  if (brightness >= 255)
+    ledController.setBrightness(step); // Reset to 20%
+  else
+    ledController.setBrightness(ledController.getBrightness() + step); // Increase brightness by 20%
 }
-
-void selectNextExpression()
-{
-  nextExpression = (Expression)((nextExpression + 1) % Expression_COUNT);
-}
-
-void selectExpression(Expression expr)
-{
-  nextExpression = expr;
-}
-
-void expressionPreSelectToggle()
-{
-  expressionPreSelection = !expressionPreSelection;
-}
-
-void togglePersistentColor()
-{
-  persistentColor = !persistentColor;
-}
-/*
-0 1 2 3
-4 5 6 7
-8 9 10 11
-12 13 14 15
-*/
