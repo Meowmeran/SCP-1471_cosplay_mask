@@ -1,35 +1,24 @@
-#include "Core/ExpressionManager.h"
+#include "Led/Expressions.h"
+#include "Led/FrameBuffer.h"
+
+#ifndef EXPRESSION_MANAGER_H
+#define EXPRESSION_MANAGER_H
 
 namespace Core
 {
-    ExpressionManager::ExpressionManager(MaskFrame* frame) : currentExpression(Expressions::Type::Neutral), frame(frame)
+    class ExpressionManager
     {
-        if (frame == nullptr)
-        {
-            Serial.println("Error: ExpressionManager initialized with null frame pointer.");
-        }
-        
-    }
+    private:
+        uint32_t lastUpdateTime;
+        Expressions::Type currentExpression;
+        MaskFrame *frame;
 
-    void ExpressionManager::setExpression(Expressions::Type type)
-    {
-        currentExpression = type;
-    }
+    public:
+        ExpressionManager(MaskFrame* frame) : currentExpression(Expressions::Type::Neutral), frame(frame) {}
 
-    Expressions::Type ExpressionManager::getCurrentExpression() const
-    {
-        return currentExpression;
-    }
-
-    void ExpressionManager::updateFrame()
-    {
-        if (frame != nullptr)
-        {
-            Expressions::render(currentExpression, *frame);
-        }
-        else
-        {
-            Serial.println("Error: Cannot update frame, frame pointer is null.");
-        }
-    }
-} // namespace Core
+        void setExpression(Expressions::Type type);
+        Expressions::Type getCurrentExpression() const;
+        void updateFrame();
+    };
+}
+#endif // EXPRESSION_MANAGER_H
