@@ -16,10 +16,56 @@ namespace Core
         currentExpression = type;
     }
 
-    Expressions::Type ExpressionManager::getCurrentExpression() const
+    void ExpressionManager::setExpression(){
+        currentExpression = selectedExpression;
+    }
+
+    Expressions::Type ExpressionManager::nextExpression()
     {
+        int next = static_cast<int>(currentExpression) + 1;
+        if (next >= static_cast<int>(Expressions::Type::SIZE))
+        {
+            next = 0;
+        }
+        currentExpression = static_cast<Expressions::Type>(next);
         return currentExpression;
     }
+    Expressions::Type ExpressionManager::previousExpression()
+    {
+        int prev = static_cast<int>(currentExpression) - 1;
+        if (prev < 0)
+        {
+            prev = static_cast<int>(Expressions::Type::SIZE) - 1;
+        }
+        currentExpression = static_cast<Expressions::Type>(prev);
+        return currentExpression;
+    }
+
+    Expressions::Type ExpressionManager::selectNextExpression()
+    {
+        int next = static_cast<int>(selectedExpression) + 1;
+        if (next >= static_cast<int>(Expressions::Type::SIZE))
+        {
+            next = 0;
+        }
+        selectedExpression = static_cast<Expressions::Type>(next);
+        return selectedExpression;
+    }
+    Expressions::Type ExpressionManager::selectPreviousExpression()
+    {
+        int prev = static_cast<int>(selectedExpression) - 1;
+        if (prev < 0)
+        {
+            prev = static_cast<int>(Expressions::Type::SIZE) - 1;
+        }
+        selectedExpression = static_cast<Expressions::Type>(prev);
+        return selectedExpression;
+    }
+    void ExpressionManager::selectExpression(Expressions::Type type)
+    {
+        selectedExpression = type;
+    }
+
 
     void ExpressionManager::updateFrame()
     {
