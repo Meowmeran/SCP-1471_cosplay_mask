@@ -16,7 +16,9 @@
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
 
 // Global instances
-ButtonHandler buttonHandler(300, 700); // 300ms for double tap, 700ms for hold
+const unsigned long DOUBLE_TAP_TIME = 300;               // milliseconds
+const unsigned long HOLD_TIME = 700;                     // milliseconds
+ButtonHandler buttonHandler(DOUBLE_TAP_TIME, HOLD_TIME); // 300ms for double tap, 700ms for hold
 MaskFrame frame = MaskFrame();
 Core::ModeManager modeManager = Core::ModeManager();
 Core::ExpressionManager expressionManager = Core::ExpressionManager(&frame);
@@ -93,7 +95,33 @@ void loop()
 void onButton1Tap()
 {
   Serial.println("Button 1: Tap");
-  cycleMode();
+
+  if (!buttonHandler.isButtonHeld(BUTTON3_PIN))
+  {
+    wakeUp();
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+
+      expressionManager.nextExpression();
+      break;
+
+    default:
+      break;
+    }
+  }
+  else // Button 3 is held
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+    case Core::Mode::MANUAL:
+      cycleBrightness();
+      break;
+    default:
+      break;
+    }
+  }
 }
 
 void onButton1DoubleTap()
@@ -109,6 +137,7 @@ void onButton1Hold()
 
 void onButton2Tap()
 {
+  wakeUp();
   Serial.println("Button 2: Tap");
   cycleBrightness();
 }
@@ -127,6 +156,7 @@ void onButton2Hold()
 void onButton3Tap()
 {
   Serial.println("Button 3: Tap");
+  wakeUp();
   // Add your button 3 action here
 }
 void onButton3DoubleTap()
@@ -160,12 +190,30 @@ void cycleMode()
   }
 }
 
+void wakeUp()
+{
+  if (modeManager.isOff())
+  {
+    modeManager.setMode(Core::Mode::ACTIVE);
+  }
+}
+
+void toggleOnOffMode()
+{
+  if (modeManager.isOff())
+  {
+    modeManager.setMode(Core::Mode::ACTIVE);
+  }
+  else
+  {
+    modeManager.setMode(Core::Mode::OFF);
+  }
+}
+
 void cycleBrightness()
 {
-  uint8_t step = 51; // 20% of 255
+  const uint8_t BRIGHTNESS_STEP = 51; // 20% increments
   uint8_t brightness = ledController.getBrightness();
-  if (brightness >= 255)
-    ledController.setBrightness(step); // Reset to 20%
-  else
-    ledController.setBrightness(ledController.getBrightness() + step); // Increase brightness by 20%
+  uint8_t newBrightness = (brightness + BRIGHTNESS_STEP > 255) ? BRIGHTNESS_STEP : brightness + BRIGHTNESS_STEP;
+  ledController.setBrightness(newBrightness);
 }
