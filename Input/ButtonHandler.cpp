@@ -183,6 +183,15 @@ bool ButtonHandler::isButtonHeld(uint8_t buttonPin) const
 
 uint8_t ButtonHandler::getHeldButtons() const
 {
+    // Return a bitmask of held buttons 
+    // Bit 0 = Button 0, Bit 1 = Button 1, etc.
+    // Assumes MAX_BUTTONS <= 8    
+    if (MAX_BUTTONS > 8)
+    {
+        Serial.println("getHeldButtons() supports up to 8 buttons only.");
+        return 0; // Unsupported
+    }
+    
     uint8_t heldButtons = 0;
     for (uint8_t i = 0; i < MAX_BUTTONS; ++i)
     {
