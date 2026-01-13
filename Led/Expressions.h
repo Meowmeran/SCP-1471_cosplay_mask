@@ -10,7 +10,8 @@ public:
         Sad,
         Angry,
         Surprised,
-        Lovely
+        Lovely,
+        SIZE
     };
 
     // Take a frame, modify it to represent the given expression
