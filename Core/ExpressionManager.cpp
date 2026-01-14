@@ -2,7 +2,7 @@
 
 namespace Core
 {
-    ExpressionManager::ExpressionManager(MaskFrame* frame) : currentExpression(Expressions::Type::Neutral), frame(frame)
+    ExpressionManager::ExpressionManager(MaskFrame* frame) : currentExpression(Expressions::Type::Neutral), selectedExpression(Expressions::Type::Neutral), frame(frame)
     {
         if (frame == nullptr)
         {
