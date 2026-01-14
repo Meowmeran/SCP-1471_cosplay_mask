@@ -3,6 +3,7 @@
 #include "Input/ButtonHandler.h"
 #include "Led/LedController.h"
 #include "Led/Expressions.h"
+#include "Led/FrameBuffer.h"
 #include "Math/Orientation.h"
 #include "Core/ModeManager.h"
 #include "Core/ExpressionManager.h"
