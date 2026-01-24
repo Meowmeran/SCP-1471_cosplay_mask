@@ -133,6 +133,7 @@ public:
     Rainbow,
     Flashing,
     Dead,
+    Matrix,
     SIZE
   };
 
@@ -167,6 +168,9 @@ public:
     case Type::Dead:
       renderDead(frame);
       break;
+    case Type::Matrix:
+      renderMatrix(frame);
+      break;
     default:
       renderNeutral(frame);
       break;
@@ -180,9 +184,79 @@ private:
     uint8_t g = 255;
     uint8_t b = 255;
 
+    static uint32_t nextBlinkTime = 0;
+    static uint32_t nextLookTime = 0;
+    static uint32_t blinkStartTime = 0;
+    static uint32_t lookStartTime = 0;
+    static int8_t lookDirection = 0;
+    static uint16_t currentLookPeriod = 0;
+
     uint32_t currentTime = millis();
-    uint32_t cycle = currentTime % 3000; // 3 second cycle
-    bool isBlinking = cycle < 200;       // Blink for 200ms
+
+    uint16_t minBlinkTime = 3000;
+    uint16_t maxBlinkTime = 8000;
+    uint16_t blinkPeriod = 200;
+
+    uint16_t minLookTime = 3000;
+    uint16_t maxLookTime = 10000;
+    uint16_t minLookPeriod = 200;
+    uint16_t maxLookPeriod = 2300;
+
+    // Initialize timers on first call
+    if (nextBlinkTime == 0)
+    {
+      nextBlinkTime = currentTime + random(minBlinkTime, maxBlinkTime);
+    }
+    if (nextLookTime == 0)
+    {
+      nextLookTime = currentTime + random(minLookTime, maxLookTime);
+    }
+
+    // Check if we should start blinking
+    bool isBlinking = false;
+    if (currentTime >= nextBlinkTime && currentTime < nextBlinkTime + blinkPeriod)
+    {
+      isBlinking = true;
+      if (blinkStartTime == 0)
+      {
+        blinkStartTime = currentTime;
+      }
+    }
+    else if (currentTime >= nextBlinkTime + blinkPeriod)
+    {
+      blinkStartTime = 0;
+      nextBlinkTime = currentTime + random(minBlinkTime, maxBlinkTime);
+    }
+
+    // Check if we should start looking
+    bool isLooking = false;
+    if (currentTime >= nextLookTime && currentTime < nextLookTime + currentLookPeriod)
+    {
+      isLooking = true;
+      if (lookStartTime == 0)
+      {
+        lookStartTime = currentTime;
+        lookDirection = random(0, 4);
+      }
+    }
+    else if (currentTime >= nextLookTime + currentLookPeriod)
+    {
+      lookStartTime = 0;
+      nextLookTime = currentTime + random(minLookTime, maxLookTime);
+      currentLookPeriod = random(minLookPeriod, maxLookPeriod);
+    }
+
+    int8_t pixelShift = 0;
+    if (isLooking && !isBlinking)
+    {
+      bool horizontalLook = (lookDirection == 0 || lookDirection == 1);
+      bool horizontalOppositeLook = (lookDirection == 1);
+      bool verticalLook = (lookDirection == 2 || lookDirection == 3);
+      bool verticalOppositeLook = (lookDirection == 3);
+
+      pixelShift = horizontalLook ? 1 : (horizontalOppositeLook ? -1 : 0);
+      pixelShift += verticalLook ? 4 : (verticalOppositeLook ? -4 : 0);
+    }
 
     for (uint8_t y = 0; y < 4; y++)
     {
@@ -200,7 +274,7 @@ private:
         }
         else
         {
-          if (pixelIndex == 5 || pixelIndex == 6 || pixelIndex == 9 || pixelIndex == 10)
+          if (pixelIndex == 5 + pixelShift || pixelIndex == 6 + pixelShift || pixelIndex == 9 + pixelShift || pixelIndex == 10 + pixelShift)
           {
             intensity = 255;
           }
@@ -218,6 +292,16 @@ private:
     uint8_t g = 115;
     uint8_t b = 155;
 
+    uint32_t currentTime = millis();
+
+    uint16_t minBlinkTime = 1000;
+    uint16_t maxBlinkTime = 5000;
+    uint16_t blinkPeriod = 200;
+    uint16_t blinkingFrequency = 5000;
+    uint32_t blinkingCycle = currentTime % blinkingFrequency;
+    bool isBlinking = blinkingCycle < blinkPeriod;
+    bool hasBlinked = false;
+
     for (uint8_t y = 0; y < 4; y++)
     {
       for (uint8_t x = 0; x < 4; x++)
@@ -225,13 +309,27 @@ private:
         uint8_t pixelIndex = y * 4 + x;
         uint8_t intensity = 0;
 
-        if (pixelIndex == 5 || pixelIndex == 6 || pixelIndex == 8 || pixelIndex == 11)
+        if (isBlinking)
         {
-          intensity = 255;
+          if (pixelIndex == 8 || pixelIndex == 9 || pixelIndex == 10 || pixelIndex == 11)
+          {
+            intensity = 255;
+          }
+          if (!hasBlinked && blinkingCycle < 50)
+          {
+            hasBlinked = true;
+          }
         }
-        else if (pixelIndex == 1 || pixelIndex == 2 || pixelIndex == 4 || pixelIndex == 7 || pixelIndex == 9 || pixelIndex == 10 || pixelIndex == 12 || pixelIndex == 13 || pixelIndex == 14 || pixelIndex == 15)
+        else
         {
-          intensity = 0;
+          if (pixelIndex == 5 || pixelIndex == 6 || pixelIndex == 8 || pixelIndex == 11)
+          {
+            intensity = 255;
+          }
+          else if (pixelIndex == 1 || pixelIndex == 2 || pixelIndex == 4 || pixelIndex == 7 || pixelIndex == 9 || pixelIndex == 10 || pixelIndex == 12 || pixelIndex == 13 || pixelIndex == 14 || pixelIndex == 15)
+          {
+            intensity = 0;
+          }
         }
 
         frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
@@ -420,6 +518,114 @@ private:
 
         frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
         frame.right[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+      }
+    }
+  }
+  static void renderMatrix(MaskFrame &frame)
+  {
+    // Configuration variables
+    static const uint16_t UPDATE_INTERVAL = 75;      // Speed: milliseconds between updates (lower = faster)
+    static const uint8_t DROP_FREQUENCY = 4;         // Frequency: 0-10 chance per update to start new drop
+    static const uint8_t MIN_TRAIL_LENGTH = 2;       // Minimum trail length
+    static const uint8_t MAX_TRAIL_LENGTH = 8;       // Maximum trail length
+    static const uint8_t HEAD_BRIGHTNESS = 255;      // Brightness of drop head (0-255)
+    static const uint8_t TRAIL_BRIGHTNESS_RATIO = 2; // Trail fade divisor (higher = dimmer trail)
+
+    static uint32_t lastUpdateTime = 0;
+    static uint8_t dropPositions[8] = {0}; // Track drop position for each column
+    static uint8_t dropLengths[8] = {0};   // Track length of each drop
+    static bool dropActive[8] = {false};   // Track if drop is active
+
+    uint32_t currentTime = millis();
+
+    // Initialize drops randomly
+    if (lastUpdateTime == 0)
+    {
+      lastUpdateTime = currentTime;
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        dropActive[i] = random(0, 2);
+        dropPositions[i] = random(0, 8);
+        dropLengths[i] = random(MIN_TRAIL_LENGTH, MAX_TRAIL_LENGTH + 1);
+      }
+    }
+
+    // Update drops based on UPDATE_INTERVAL
+    if (currentTime - lastUpdateTime > UPDATE_INTERVAL)
+    {
+      lastUpdateTime = currentTime;
+
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        if (dropActive[i])
+        {
+          dropPositions[i]++;
+          if (dropPositions[i] > 8 + dropLengths[i])
+          {
+            dropActive[i] = false;
+          }
+        }
+        else if (random(0, 10) < DROP_FREQUENCY)
+        {
+          dropActive[i] = true;
+          dropPositions[i] = 0;
+          dropLengths[i] = random(MIN_TRAIL_LENGTH, MAX_TRAIL_LENGTH + 1);
+        }
+      }
+    }
+
+    // Render the matrix effect
+    for (uint8_t side = 0; side < 2; side++)
+    {
+      for (uint8_t col = 0; col < 4; col++)
+      {
+        uint8_t dropIndex = side * 4 + col;
+
+        if (dropActive[dropIndex])
+        {
+          for (uint8_t row = 0; row < 4; row++)
+          {
+            int8_t distanceFromHead = (int8_t)dropPositions[dropIndex] - (int8_t)row;
+            uint8_t intensity = 0;
+
+            if (distanceFromHead >= 0 && distanceFromHead <= dropLengths[dropIndex])
+            {
+              if (distanceFromHead == 0)
+              {
+                // Brightest at head
+                intensity = HEAD_BRIGHTNESS;
+              }
+              else
+              {
+                // Dimmer trail with configurable fade
+                intensity = HEAD_BRIGHTNESS / (distanceFromHead * TRAIL_BRIGHTNESS_RATIO);
+              }
+            }
+
+            if (side == 0)
+            {
+              frame.left[row][col] = {0, intensity, 0};
+            }
+            else
+            {
+              frame.right[row][col] = {0, intensity, 0};
+            }
+          }
+        }
+        else
+        {
+          for (uint8_t row = 0; row < 4; row++)
+          {
+            if (side == 0)
+            {
+              frame.left[row][col] = {0, 0, 0};
+            }
+            else
+            {
+              frame.right[row][col] = {0, 0, 0};
+            }
+          }
+        }
       }
     }
   }
@@ -802,6 +1008,13 @@ public:
         if (state.lastReleaseTime < doubleTapThreshold)
         {
           state.lastReleaseTime += deltaTime;
+          
+          // Check if we should fire the pending tap (no double-tap occurred)
+          if (state.pendingTap && state.lastReleaseTime >= doubleTapThreshold)
+          {
+            triggerActions(state.pin, ButtonEvent::Tap);
+            state.pendingTap = false;
+          }
         }
       }
     }
@@ -845,6 +1058,7 @@ private:
     uint32_t lastReleaseTime = 0;
     bool holdTriggered = false;
     uint32_t lastChangeTime = 0;
+    bool pendingTap = false;
   };
 
   struct Action
@@ -933,12 +1147,17 @@ private:
           {
             if (!state.holdTriggered && state.pressTime < holdThreshold)
             {
-              // It was a short press (Tap)
-              triggerActions(state.pin, ButtonEvent::Tap);
+              // It was a short press - check for double tap first
               checkDoubleTap(state);
             }
+            
+            // Always trigger release event (even after hold)
             triggerActions(state.pin, ButtonEvent::Release);
-            state.lastReleaseTime = 0;
+            
+            if (!state.holdTriggered && state.pressTime < holdThreshold)
+            {
+              state.lastReleaseTime = 0;
+            }
           }
         }
       }
@@ -949,12 +1168,16 @@ private:
   {
     if (state.lastReleaseTime > 0 && state.lastReleaseTime < doubleTapThreshold)
     {
+      // This is the second tap - fire double-tap and cancel any pending single tap
       triggerActions(state.pin, ButtonEvent::DoubleTap);
-      state.lastReleaseTime = 0;
+      state.lastReleaseTime = doubleTapThreshold; // Prevent further taps
+      state.pendingTap = false;
     }
     else
     {
+      // This is the first tap - mark it as pending and start the timer
       state.lastReleaseTime = 0;
+      state.pendingTap = true;
     }
   }
 
@@ -993,18 +1216,21 @@ LedController ledController = LedController(NEO_PIN, NEO_NUMPIXEL);
 void onButton1Tap();
 void onButton1DoubleTap();
 void onButton1Hold();
+void onButton1Release();
 void onButton2Tap();
 void onButton2DoubleTap();
 void onButton2Hold();
+void onButton2Release();
 void onButton3Tap();
 void onButton3DoubleTap();
 void onButton3Hold();
+void onButton3Release();
 
 void setup()
 {
   Serial.begin(9600);
-  Serial.println("System Initializing...");
-  delay(3000); // Give serial time to stabilize
+  // Serial.println("System Initializing...");
+  delay(1000); // Give serial time to stabilize
   // Initialize button handler with pins
   buttonHandler.begin(BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN);
 
@@ -1012,17 +1238,21 @@ void setup()
   buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Tap, onButton1Tap);
   buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton1DoubleTap);
   buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Hold, onButton1Hold);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Release, onButton1Release);
   buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Tap, onButton2Tap);
   buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton2DoubleTap);
   buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Hold, onButton2Hold);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Release, onButton2Release);
   buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Tap, onButton3Tap);
   buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton3DoubleTap);
   buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Hold, onButton3Hold);
+  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Release, onButton3Release);
 
   ledController.begin();
-  ledController.setBrightness(255);
+  ledController.setBrightness(5);
 
   frame.clear();
+  modeManager.setMode(Core::Mode::ACTIVE);
 }
 
 unsigned long lastUpdate = 0;
@@ -1058,7 +1288,7 @@ void loop()
 }
 
 // --- BUTTON ACTION HANDLERS ---
-
+// Tap handlers
 void onButton1Tap()
 {
   Serial.println("Button 1: Tap");
@@ -1089,17 +1319,6 @@ void onButton1Tap()
   }
 }
 
-void onButton1DoubleTap()
-{
-  Serial.println("Button 1: Double Tap");
-}
-
-void onButton1Hold()
-{
-  Serial.println("Button 1: Hold");
-  toggleOnOffMode();
-}
-
 void onButton2Tap()
 {
   Serial.println("Button 2: Tap");
@@ -1128,9 +1347,30 @@ void onButton2Tap()
   }
 }
 
+void onButton3Tap()
+{
+}
+
+// Double tap handlers
+void onButton1DoubleTap()
+{
+  Serial.println("Button 1: Double Tap");
+}
+
 void onButton2DoubleTap()
 {
   Serial.println("Button 2: Double Tap");
+}
+
+void onButton3DoubleTap()
+{
+}
+
+// Hold handlers
+void onButton1Hold()
+{
+  Serial.println("Button 1: Hold");
+  toggleOnOffMode();
 }
 
 void onButton2Hold()
@@ -1138,16 +1378,24 @@ void onButton2Hold()
   Serial.println("Button 2: Hold");
 }
 
-void onButton3Tap()
-{
-}
-
-void onButton3DoubleTap()
-{
-}
-
 void onButton3Hold()
 {
+}
+
+// Release handlers
+void onButton1Release()
+{
+  
+}
+
+void onButton2Release()
+{
+  // Add release action for button 2 here
+}
+
+void onButton3Release()
+{
+  // Add release action for button 3 here
 }
 
 // --- HELPER FUNCTIONS ---
