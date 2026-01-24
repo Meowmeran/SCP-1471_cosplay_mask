@@ -130,6 +130,7 @@ public:
     Angry,
     Surprised,
     Lovely,
+    NORMAL_EXPRESSION_END,
     Rainbow,
     Flashing,
     Dead,
@@ -236,7 +237,7 @@ private:
       if (lookStartTime == 0)
       {
         lookStartTime = currentTime;
-        lookDirection = random(0, 4);
+        lookDirection = random(0, 8);
       }
     }
     else if (currentTime >= nextLookTime + currentLookPeriod)
@@ -249,13 +250,40 @@ private:
     int8_t pixelShift = 0;
     if (isLooking && !isBlinking)
     {
-      bool horizontalLook = (lookDirection == 0 || lookDirection == 1);
-      bool horizontalOppositeLook = (lookDirection == 1);
-      bool verticalLook = (lookDirection == 2 || lookDirection == 3);
-      bool verticalOppositeLook = (lookDirection == 3);
-
-      pixelShift = horizontalLook ? 1 : (horizontalOppositeLook ? -1 : 0);
-      pixelShift += verticalLook ? 4 : (verticalOppositeLook ? -4 : 0);
+      // lookDirection: 0 = right, 1 = left, 2 = down, 3 = up
+      // Adjust to support 8 directions: 0-7
+      // 0=right, 1=left, 2=down, 3=up, 4=right-down, 5=left-down, 6=right-up, 7=left-up
+      
+      switch (lookDirection)
+      {
+        case 0: // right
+          pixelShift = 1;
+          break;
+        case 1: // left
+          pixelShift = -1;
+          break;
+        case 2: // down
+          pixelShift = 4;
+          break;
+        case 3: // up
+          pixelShift = -4;
+          break;
+        case 4: // right-down
+          pixelShift = 5;
+          break;
+        case 5: // left-down
+          pixelShift = 3;
+          break;
+        case 6: // right-up
+          pixelShift = -3;
+          break;
+        case 7: // left-up
+          pixelShift = -5;
+          break;
+        default:
+          pixelShift = 0;
+          break;
+      }
     }
 
     for (uint8_t y = 0; y < 4; y++)
@@ -843,24 +871,19 @@ namespace Core
   private:
     uint32_t lastUpdateTime = 0;
     Expressions::Type currentExpression;
-    Expressions::Type selectedExpression;
+    Expressions::Type quickExpression;
     MaskFrame *frame;
 
   public:
     ExpressionManager(MaskFrame *frame)
         : currentExpression(Expressions::Type::Neutral),
-          selectedExpression(Expressions::Type::Neutral),
+          quickExpression(Expressions::Type::Neutral),
           frame(frame)
     {
       if (frame == nullptr)
       {
         // Handle null frame pointer
       }
-    }
-
-    void setExpression()
-    {
-      currentExpression = selectedExpression;
     }
 
     void setExpression(Expressions::Type type)
@@ -888,33 +911,65 @@ namespace Core
       return currentExpression;
     }
 
-    void selectExpression(Expressions::Type type)
+    Expressions::Type nextNormalExpression()
     {
-      selectedExpression = type;
-    }
-
-    Expressions::Type selectNextExpression()
-    {
-      int next = static_cast<int>(selectedExpression) + 1;
-      if (next >= static_cast<int>(Expressions::Type::SIZE))
+      int next = static_cast<int>(currentExpression) + 1;
+      if (next >= static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END))
         next = 0;
 
-      selectedExpression = static_cast<Expressions::Type>(next);
-      return selectedExpression;
+      currentExpression = static_cast<Expressions::Type>(next);
+      return currentExpression;
     }
 
-    Expressions::Type selectPreviousExpression()
+    Expressions::Type previousNormalExpression()
     {
-      int prev = static_cast<int>(selectedExpression) - 1;
+      int prev = static_cast<int>(currentExpression) - 1;
       if (prev < 0)
-        prev = static_cast<int>(Expressions::Type::SIZE) - 1;
+        prev = static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END) - 1;
 
-      selectedExpression = static_cast<Expressions::Type>(prev);
-      return selectedExpression;
+      currentExpression = static_cast<Expressions::Type>(prev);
+      return currentExpression;
     }
 
-    Expressions::Type getSelectedExpression() const { return selectedExpression; }
+    Expressions::Type nextMiscExpression()
+    {
+      int next = static_cast<int>(currentExpression) + 1;
+      if (next < static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END) ||
+          next >= static_cast<int>(Expressions::Type::SIZE))
+      {
+        next = static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END);
+      }
+
+      currentExpression = static_cast<Expressions::Type>(next);
+      return currentExpression;
+    }
+
+    Expressions::Type previousMiscExpression()
+    {
+      int prev = static_cast<int>(currentExpression) - 1;
+      if (prev < static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END))
+      {
+        prev = static_cast<int>(Expressions::Type::SIZE) - 1;
+      }
+
+      currentExpression = static_cast<Expressions::Type>(prev);
+      return currentExpression;
+    }
+
+    void quickSwitch()
+    {
+      Expressions::Type temp = currentExpression;
+      currentExpression = quickExpression;
+      quickExpression = temp;
+    }
+
+    void tagQuickExpression()
+    {
+      quickExpression = currentExpression;
+    }
+
     Expressions::Type getCurrentExpression() const { return currentExpression; }
+    Expressions::Type getQuickExpression() const { return quickExpression; }
 
     void updateFrame()
     {
@@ -1059,6 +1114,7 @@ private:
     bool holdTriggered = false;
     uint32_t lastChangeTime = 0;
     bool pendingTap = false;
+    bool combinationTriggered = false;
   };
 
   struct Action
@@ -1100,6 +1156,17 @@ private:
 
   void triggerActions(uint8_t buttonPin, ButtonEvent event)
   {
+    // Check if any OTHER button is currently held
+    for (int i = 0; i < MAX_BUTTONS; ++i)
+    {
+      if (buttons[i].pin != 0xFF && buttons[i].pin != buttonPin && 
+          buttons[i].isPressed && buttons[i].pressTime >= holdThreshold)
+      {
+        // Mark that held button as part of a combination
+        buttons[i].combinationTriggered = true;
+      }
+    }
+    
     for (int i = 0; i < MAX_ACTIONS; ++i)
     {
       if (actions[i].buttonPin == buttonPin && actions[i].event == event)
@@ -1141,6 +1208,7 @@ private:
           {
             state.pressTime = 0;
             state.holdTriggered = false;
+            state.combinationTriggered = false;
             // Optional: triggerActions(state.pin, ButtonEvent::Press);
           }
           else // BUTTON RELEASED
@@ -1151,8 +1219,11 @@ private:
               checkDoubleTap(state);
             }
             
-            // Always trigger release event (even after hold)
-            triggerActions(state.pin, ButtonEvent::Release);
+            // Only trigger release event if button was held and no combination was performed
+            if (state.holdTriggered && !state.combinationTriggered)
+            {
+              triggerActions(state.pin, ButtonEvent::Release);
+            }
             
             if (!state.holdTriggered && state.pressTime < holdThreshold)
             {
@@ -1221,10 +1292,6 @@ void onButton2Tap();
 void onButton2DoubleTap();
 void onButton2Hold();
 void onButton2Release();
-void onButton3Tap();
-void onButton3DoubleTap();
-void onButton3Hold();
-void onButton3Release();
 
 void setup()
 {
@@ -1243,10 +1310,6 @@ void setup()
   buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton2DoubleTap);
   buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Hold, onButton2Hold);
   buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Release, onButton2Release);
-  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Tap, onButton3Tap);
-  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton3DoubleTap);
-  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Hold, onButton3Hold);
-  buttonHandler.registerAction(BUTTON3_PIN, ButtonHandler::ButtonEvent::Release, onButton3Release);
 
   ledController.begin();
   ledController.setBrightness(5);
@@ -1299,7 +1362,7 @@ void onButton1Tap()
     switch (modeManager.getMode())
     {
     case Core::Mode::ACTIVE:
-      expressionManager.nextExpression();
+      expressionManager.nextNormalExpression();
       break;
     default:
       break;
@@ -1328,7 +1391,7 @@ void onButton2Tap()
     {
     case Core::Mode::ACTIVE:
       wakeUp();
-      expressionManager.previousExpression();
+      expressionManager.previousNormalExpression();
       break;
     default:
       break;
@@ -1347,30 +1410,40 @@ void onButton2Tap()
   }
 }
 
-void onButton3Tap()
-{
-}
-
 // Double tap handlers
 void onButton1DoubleTap()
 {
   Serial.println("Button 1: Double Tap");
+  if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
+  {
+    
+  }
+  else 
+  {
+    expressionManager.nextMiscExpression();
+  }
+  
 }
 
 void onButton2DoubleTap()
 {
   Serial.println("Button 2: Double Tap");
+  if (!buttonHandler.isButtonHeld(BUTTON1_PIN))
+  {
+    expressionManager.quickSwitch();
+  }
+  else 
+  {
+    expressionManager.previousMiscExpression();
+  }
+  
 }
 
-void onButton3DoubleTap()
-{
-}
 
 // Hold handlers
 void onButton1Hold()
 {
   Serial.println("Button 1: Hold");
-  toggleOnOffMode();
 }
 
 void onButton2Hold()
@@ -1378,28 +1451,22 @@ void onButton2Hold()
   Serial.println("Button 2: Hold");
 }
 
-void onButton3Hold()
-{
-}
 
 // Release handlers
 void onButton1Release()
 {
-  
+  Serial.println("Button 1: Release");
+  toggleOnOffMode();
 }
 
 void onButton2Release()
 {
-  // Add release action for button 2 here
-}
-
-void onButton3Release()
-{
-  // Add release action for button 3 here
+  Serial.println("Button 2: Release");
+  expressionManager.tagQuickExpression();
 }
 
 // --- HELPER FUNCTIONS ---
-void cycleMode()
+/*void cycleMode()
 {
   switch (modeManager.getMode())
   {
@@ -1416,7 +1483,7 @@ void cycleMode()
     modeManager.setMode(Core::Mode::OFF);
     break;
   }
-}
+}*/
 
 void wakeUp()
 {
