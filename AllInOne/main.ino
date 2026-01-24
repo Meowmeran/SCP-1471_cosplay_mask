@@ -135,6 +135,7 @@ public:
     Flashing,
     Dead,
     Matrix,
+    Loading,
     SIZE
   };
 
@@ -171,6 +172,9 @@ public:
       break;
     case Type::Matrix:
       renderMatrix(frame);
+      break;
+    case Type::Loading:
+      renderLoading(frame);
       break;
     default:
       renderNeutral(frame);
@@ -253,36 +257,36 @@ private:
       // lookDirection: 0 = right, 1 = left, 2 = down, 3 = up
       // Adjust to support 8 directions: 0-7
       // 0=right, 1=left, 2=down, 3=up, 4=right-down, 5=left-down, 6=right-up, 7=left-up
-      
+
       switch (lookDirection)
       {
-        case 0: // right
-          pixelShift = 1;
-          break;
-        case 1: // left
-          pixelShift = -1;
-          break;
-        case 2: // down
-          pixelShift = 4;
-          break;
-        case 3: // up
-          pixelShift = -4;
-          break;
-        case 4: // right-down
-          pixelShift = 5;
-          break;
-        case 5: // left-down
-          pixelShift = 3;
-          break;
-        case 6: // right-up
-          pixelShift = -3;
-          break;
-        case 7: // left-up
-          pixelShift = -5;
-          break;
-        default:
-          pixelShift = 0;
-          break;
+      case 0: // right
+        pixelShift = 1;
+        break;
+      case 1: // left
+        pixelShift = -1;
+        break;
+      case 2: // down
+        pixelShift = 4;
+        break;
+      case 3: // up
+        pixelShift = -4;
+        break;
+      case 4: // right-down
+        pixelShift = 5;
+        break;
+      case 5: // left-down
+        pixelShift = 3;
+        break;
+      case 6: // right-up
+        pixelShift = -3;
+        break;
+      case 7: // left-up
+        pixelShift = -5;
+        break;
+      default:
+        pixelShift = 0;
+        break;
       }
     }
 
@@ -436,7 +440,7 @@ private:
         uint8_t pixelIndex = y * 4 + x;
         uint8_t intensity = 0;
 
-        if (pixelIndex == 4 || pixelIndex == 5 || pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 11)
+        if (pixelIndex == 4-4 || pixelIndex == 5-4 || pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 11)
         {
           intensity = 255;
         }
@@ -655,6 +659,54 @@ private:
           }
         }
       }
+    }
+  }
+  static void renderLoading(MaskFrame &frame)
+  {
+    static uint32_t lastUpdateTime = 0;
+    static uint8_t position = 0;
+    static const uint16_t UPDATE_INTERVAL = 75;
+    static const uint8_t TRAIL_LENGTH = 4;
+    static const uint8_t EDGE_PATH_LENGTH = 12;
+
+    uint32_t currentTime = millis();
+
+    if (currentTime - lastUpdateTime > UPDATE_INTERVAL)
+    {
+      lastUpdateTime = currentTime;
+      position = (position + 1) % EDGE_PATH_LENGTH;
+    }
+
+    // Define the edge path (clockwise around the perimeter) - 12 unique positions
+    const uint8_t edgePath[12][2] = {
+        {0, 0}, {0, 1}, {0, 2}, {0, 3}, // Top edge
+        {1, 3},
+        {2, 3},
+        {3, 3}, // Right edge
+        {3, 2},
+        {3, 1},
+        {3, 0}, // Bottom edge
+        {2, 0},
+        {1, 0} // Left edge
+    };
+
+    frame.clear();
+
+    // Render the loading pixel and trail
+    for (uint8_t i = 0; i < TRAIL_LENGTH; i++)
+    {
+      uint8_t trailPos = (position + EDGE_PATH_LENGTH - i) % EDGE_PATH_LENGTH;
+
+      uint8_t row = edgePath[trailPos][0];
+      uint8_t col = edgePath[trailPos][1];
+
+      uint8_t intensity = 255 - (i * 255 / TRAIL_LENGTH);
+      uint8_t r = (255 * intensity) / 255;
+      uint8_t g = (140 * intensity) / 255;
+      uint8_t b = 0;
+
+      frame.left[row][col] = {r, g, b};
+      frame.right[row][col] = {r, g, b};
     }
   }
 };
@@ -926,7 +978,8 @@ namespace Core
       int prev = static_cast<int>(currentExpression) - 1;
       if (prev < 0)
         prev = static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END) - 1;
-
+      if (prev >= static_cast<int>(Expressions::Type::NORMAL_EXPRESSION_END))
+        prev = static_cast<int>(Expressions::Type::Neutral);
       currentExpression = static_cast<Expressions::Type>(prev);
       return currentExpression;
     }
@@ -1063,7 +1116,7 @@ public:
         if (state.lastReleaseTime < doubleTapThreshold)
         {
           state.lastReleaseTime += deltaTime;
-          
+
           // Check if we should fire the pending tap (no double-tap occurred)
           if (state.pendingTap && state.lastReleaseTime >= doubleTapThreshold)
           {
@@ -1159,14 +1212,14 @@ private:
     // Check if any OTHER button is currently held
     for (int i = 0; i < MAX_BUTTONS; ++i)
     {
-      if (buttons[i].pin != 0xFF && buttons[i].pin != buttonPin && 
+      if (buttons[i].pin != 0xFF && buttons[i].pin != buttonPin &&
           buttons[i].isPressed && buttons[i].pressTime >= holdThreshold)
       {
         // Mark that held button as part of a combination
         buttons[i].combinationTriggered = true;
       }
     }
-    
+
     for (int i = 0; i < MAX_ACTIONS; ++i)
     {
       if (actions[i].buttonPin == buttonPin && actions[i].event == event)
@@ -1218,13 +1271,13 @@ private:
               // It was a short press - check for double tap first
               checkDoubleTap(state);
             }
-            
+
             // Only trigger release event if button was held and no combination was performed
             if (state.holdTriggered && !state.combinationTriggered)
             {
               triggerActions(state.pin, ButtonEvent::Release);
             }
-            
+
             if (!state.holdTriggered && state.pressTime < holdThreshold)
             {
               state.lastReleaseTime = 0;
@@ -1315,6 +1368,7 @@ void setup()
   ledController.setBrightness(5);
 
   frame.clear();
+  expressionManager.setExpression(Expressions::Type::Neutral);
   modeManager.setMode(Core::Mode::ACTIVE);
 }
 
@@ -1346,6 +1400,7 @@ void loop()
   }
   buttonHandler.update(deltaTime);
   ledController.present(frame);
+  
 
   delay(10); // Small delay for stability
 }
@@ -1358,7 +1413,11 @@ void onButton1Tap()
 
   if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
   {
-    wakeUp();
+    if (wakeUp())
+    {
+      return;
+    }
+    
     switch (modeManager.getMode())
     {
     case Core::Mode::ACTIVE:
@@ -1390,7 +1449,10 @@ void onButton2Tap()
     switch (modeManager.getMode())
     {
     case Core::Mode::ACTIVE:
-      wakeUp();
+    if (wakeUp())
+      {
+        return;
+      }
       expressionManager.previousNormalExpression();
       break;
     default:
@@ -1416,13 +1478,11 @@ void onButton1DoubleTap()
   Serial.println("Button 1: Double Tap");
   if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
   {
-    
   }
-  else 
+  else
   {
     expressionManager.nextMiscExpression();
   }
-  
 }
 
 void onButton2DoubleTap()
@@ -1432,13 +1492,11 @@ void onButton2DoubleTap()
   {
     expressionManager.quickSwitch();
   }
-  else 
+  else
   {
     expressionManager.previousMiscExpression();
   }
-  
 }
-
 
 // Hold handlers
 void onButton1Hold()
@@ -1450,7 +1508,6 @@ void onButton2Hold()
 {
   Serial.println("Button 2: Hold");
 }
-
 
 // Release handlers
 void onButton1Release()
@@ -1485,11 +1542,16 @@ void onButton2Release()
   }
 }*/
 
-void wakeUp()
+bool wakeUp()
 {
   if (modeManager.isOff())
   {
     modeManager.setMode(modeManager.getLastMode());
+    return true;
+  }
+  else
+  {
+    return false;
   }
 }
 
