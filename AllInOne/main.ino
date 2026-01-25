@@ -129,11 +129,15 @@ public:
     Sad,
     Angry,
     Surprised,
+    Wink,
+    Shy,
     Lovely,
     NORMAL_EXPRESSION_END,
     Rainbow,
+    Music,
     Flashing,
     Dead,
+    BigEyes,
     Matrix,
     Loading,
     SIZE
@@ -158,17 +162,29 @@ public:
     case Type::Surprised:
       renderSurprised(frame);
       break;
+    case Type::Wink:
+      renderWink(frame);
+      break;
+    case Type::Shy:
+      renderShy(frame);
+      break;
     case Type::Lovely:
       renderLovely(frame);
       break;
     case Type::Rainbow:
       renderRainbow(frame);
       break;
+    case Type::Music:
+      renderMusic(frame);
+      break;
     case Type::Flashing:
       renderFlashing(frame, 255, 255, 255, 200);
       break;
     case Type::Dead:
       renderDead(frame);
+      break;
+    case Type::BigEyes:
+      renderBigEyes(frame);
       break;
     case Type::Matrix:
       renderMatrix(frame);
@@ -440,7 +456,7 @@ private:
         uint8_t pixelIndex = y * 4 + x;
         uint8_t intensity = 0;
 
-        if (pixelIndex == 4-4 || pixelIndex == 5-4 || pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 11)
+        if (pixelIndex == 4 - 4 || pixelIndex == 5 - 4 || pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 11)
         {
           intensity = 255;
         }
@@ -451,6 +467,265 @@ private:
 
         frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
         frame.right[y][3 - x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+      }
+    }
+  }
+
+  static void renderWink(MaskFrame &frame)
+  {
+    uint8_t r = 255;
+    uint8_t g = 215;
+    uint8_t b = 0;
+
+    static uint32_t lastWinkSwitch = 0;
+    static uint32_t nextWinkTime = 0;
+    static uint32_t winkDuration = 0;
+    static bool winkLeft = true;
+    static bool isWinking = false;
+    static const uint32_t MIN_NORMAL_TIME = 500;        // Minimum time staring normally (3 seconds)
+    static const uint32_t MAX_NORMAL_TIME = 1000;       // Maximum time staring normally (8 seconds)
+    static const uint32_t MIN_WINK_DURATION = 2000;     // Minimum wink duration (200ms)
+    static const uint32_t MAX_WINK_DURATION = 5000;     // Maximum wink duration (500ms)
+    static const uint32_t WINK_SWITCH_INTERVAL = 10000; // Switch which eye winks every 10 seconds
+
+    uint32_t currentTime = millis();
+
+    // Initialize timers on first call
+    if (nextWinkTime == 0)
+    {
+      nextWinkTime = currentTime + random(MIN_NORMAL_TIME, MAX_NORMAL_TIME);
+    }
+
+    // Switch which eye winks every 10 seconds
+    if (currentTime - lastWinkSwitch > WINK_SWITCH_INTERVAL)
+    {
+      lastWinkSwitch = currentTime;
+      winkLeft = !winkLeft;
+    }
+
+    // Check if we should start winking
+    if (!isWinking && currentTime >= nextWinkTime)
+    {
+      isWinking = true;
+      winkDuration = random(MIN_WINK_DURATION, MAX_WINK_DURATION);
+      nextWinkTime = currentTime + winkDuration;
+    }
+    // Check if wink is over
+    else if (isWinking && currentTime >= nextWinkTime)
+    {
+      isWinking = false;
+      nextWinkTime = currentTime + random(MIN_NORMAL_TIME, MAX_NORMAL_TIME);
+    }
+
+    for (uint8_t y = 0; y < 4; y++)
+    {
+      for (uint8_t x = 0; x < 4; x++)
+      {
+        uint8_t pixelIndex = y * 4 + x;
+        uint8_t intensity = 0;
+
+        if (isWinking && winkLeft)
+        {
+          // Left eye winking: diagonal (0,5,10,15) and bottom row (12,13,14,15)
+          if (pixelIndex == 0 || pixelIndex == 5 || pixelIndex == 10 ||
+              pixelIndex == 12 || pixelIndex == 13 || pixelIndex == 14 || pixelIndex == 15)
+          {
+            intensity = 255;
+          }
+        }
+        else
+        {
+          // Normal open eye
+          if (pixelIndex == 1 + 4 || pixelIndex == 2 + 4 || pixelIndex == 4 || pixelIndex == 7 ||
+              pixelIndex == 13 - 4 || pixelIndex == 14 - 4)
+          {
+            intensity = 255;
+          }
+        }
+
+        // Apply to left eye
+        frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+
+        // Mirror to right eye with opposite wink state
+        uint8_t intensityMirrored = 0;
+        if (isWinking && !winkLeft)
+        {
+          // Right eye winking
+          if (pixelIndex == 0 || pixelIndex == 5 || pixelIndex == 10 ||
+              pixelIndex == 12 || pixelIndex == 13 || pixelIndex == 14 || pixelIndex == 15)
+          {
+            intensityMirrored = 255;
+          }
+        }
+        else
+        {
+          // Right eye normal
+          if (pixelIndex == 1 + 4 || pixelIndex == 2 + 4 || pixelIndex == 4 || pixelIndex == 7 ||
+              pixelIndex == 13 - 4 || pixelIndex == 14 - 4)
+          {
+            intensityMirrored = 255;
+          }
+        }
+
+        frame.right[y][3 - x] = {(uint8_t)(r * intensityMirrored / 255), (uint8_t)(g * intensityMirrored / 255), (uint8_t)(b * intensityMirrored / 255)};
+      }
+    }
+  }
+
+  static void renderShy(MaskFrame &frame)
+  {
+    uint8_t r = 255;
+    uint8_t g = 80;
+    uint8_t b = 180;
+
+    static uint32_t nextBlinkTime = 0;
+    static uint32_t nextLookTime = 0;
+    static uint32_t blinkStartTime = 0;
+    static uint32_t lookStartTime = 0;
+    static int8_t lookDirection = 0;
+    static uint16_t currentLookPeriod = 0;
+
+    uint32_t currentTime = millis();
+
+    uint16_t minBlinkTime = 2000;
+    uint16_t maxBlinkTime = 6000;
+    uint16_t blinkPeriod = 120;
+
+    uint16_t minLookTime = 1000;
+    uint16_t maxLookTime = 5000;
+    uint16_t minLookPeriod = 200;
+    uint16_t maxLookPeriod = 2300;
+
+    // Initialize timers on first call
+    if (nextBlinkTime == 0)
+    {
+      nextBlinkTime = currentTime + random(minBlinkTime, maxBlinkTime);
+    }
+    if (nextLookTime == 0)
+    {
+      nextLookTime = currentTime + random(minLookTime, maxLookTime);
+    }
+
+    // Check if we should start blinking
+    bool isBlinking = false;
+    if (currentTime >= nextBlinkTime && currentTime < nextBlinkTime + blinkPeriod)
+    {
+      isBlinking = true;
+      if (blinkStartTime == 0)
+      {
+        blinkStartTime = currentTime;
+      }
+    }
+    else if (currentTime >= nextBlinkTime + blinkPeriod)
+    {
+      blinkStartTime = 0;
+      nextBlinkTime = currentTime + random(minBlinkTime, maxBlinkTime);
+    }
+
+    // Check if we should start looking
+    bool isLooking = false;
+    if (currentTime >= nextLookTime && currentTime < nextLookTime + currentLookPeriod)
+    {
+      isLooking = true;
+      if (lookStartTime == 0)
+      {
+        lookStartTime = currentTime;
+        lookDirection = random(0, 8);
+      }
+    }
+    else if (currentTime >= nextLookTime + currentLookPeriod)
+    {
+      lookStartTime = 0;
+      nextLookTime = currentTime + random(minLookTime, maxLookTime);
+      currentLookPeriod = random(minLookPeriod, maxLookPeriod);
+    }
+
+    int8_t pixelShift = 0;
+    if (isLooking && !isBlinking)
+    {
+      switch (lookDirection)
+      {
+      case 0: // right
+        pixelShift = 1;
+        break;
+      case 1: // left
+        pixelShift = -1;
+        break;
+      case 2: // down
+        pixelShift = 4;
+        break;
+      case 3: // up
+        pixelShift = -4;
+        break;
+      case 4: // right-down
+        pixelShift = 5;
+        break;
+      case 5: // left-down
+        pixelShift = 3;
+        break;
+      case 6: // right-up
+        pixelShift = -3;
+        break;
+      case 7: // left-up
+        pixelShift = -5;
+        break;
+      default:
+        pixelShift = 0;
+        break;
+      }
+    }
+
+    for (uint8_t y = 0; y < 4; y++)
+    {
+      for (uint8_t x = 0; x < 4; x++)
+      {
+        uint8_t pixelIndex = y * 4 + x;
+        uint8_t intensity = 0;
+
+        if (isBlinking)
+        {
+          if (pixelIndex == 8 || pixelIndex == 9 || pixelIndex == 10 || pixelIndex == 11)
+          {
+            intensity = 255;
+          }
+        }
+        else
+        {
+          if (pixelIndex == 5 + pixelShift || pixelIndex == 6 + pixelShift || pixelIndex == 9 + pixelShift || pixelIndex == 10 + pixelShift)
+          {
+            intensity = 255;
+          }
+        }
+
+        // Check if this pixel is part of the blush (bottom row)
+        bool isBlush = (pixelIndex == 12 || pixelIndex == 13 || pixelIndex == 14 || pixelIndex == 15);
+
+        uint8_t finalR, finalG, finalB;
+
+        if (isBlush)
+        {
+          // Blush overrides eye - use blush color
+          finalR = r;
+          finalG = g;
+          finalB = b;
+        }
+        else if (intensity > 0)
+        {
+          // Eye pixels should be white
+          finalR = 255;
+          finalG = 255;
+          finalB = 255;
+        }
+        else
+        {
+          // No eye, no blush - off
+          finalR = 0;
+          finalG = 0;
+          finalB = 0;
+        }
+
+        frame.left[y][x] = {finalR, finalG, finalB};
+        frame.right[y][x] = {finalR, finalG, finalB};
       }
     }
   }
@@ -469,18 +744,14 @@ private:
         uint8_t intensity = 0;
 
         if (pixelIndex == 0 || pixelIndex == 3 || pixelIndex == 4 || pixelIndex == 5 ||
-            pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 8 || pixelIndex == 9 ||
-            pixelIndex == 10 || pixelIndex == 11 || pixelIndex == 13 || pixelIndex == 14)
+            pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 9 ||
+            pixelIndex == 10)
         {
           intensity = 255;
         }
-        else if (pixelIndex == 1 || pixelIndex == 2)
+        else if (pixelIndex == 8 || pixelIndex == 11 || pixelIndex == 13 || pixelIndex == 14)
         {
-          intensity = 0;
-        }
-        else if (pixelIndex == 12 || pixelIndex == 15)
-        {
-          intensity = 0;
+          intensity = 255;
         }
 
         frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
@@ -505,6 +776,95 @@ private:
 
         frame.left[y][x] = {r, g, b};
         frame.right[y][x] = {r, g, b};
+      }
+    }
+  }
+  static void renderMusic(MaskFrame &frame)
+  {
+    static uint32_t lastUpdateTime = 0;
+    static uint8_t pillars[8] = {0};             // Height of each pillar (1-4)
+    static const uint16_t UPDATE_INTERVAL = 100; // Update speed in milliseconds
+
+    uint32_t currentTime = millis();
+
+    // Initialize pillars on first call
+    if (lastUpdateTime == 0)
+    {
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        pillars[i] = random(1, 5); // Initialize to 1-4
+      }
+    }
+
+    // Update pillar heights
+    if (currentTime - lastUpdateTime > UPDATE_INTERVAL)
+    {
+      lastUpdateTime = currentTime;
+
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        // More varied random changes, never 0
+        if (random(0, 10) < 7) // 70% chance to change
+        {
+          if (random(0, 10) < 3) // 30% chance to be 1 or 2
+          {
+            pillars[i] = random(1, 3); // 1 or 2
+          }
+          else
+          {
+            pillars[i] = random(1, 5); // 1-4
+          }
+        }
+      }
+    }
+
+    // Define colors for each pillar
+    const RGB pillarColors[8] = {
+        {255, 0, 0},   // Red
+        {255, 127, 0}, // Orange
+        {255, 255, 0}, // Yellow
+        {0, 255, 0},   // Green
+        {0, 255, 255}, // Cyan
+        {0, 0, 255},   // Blue
+        {127, 0, 255}, // Purple
+        {255, 0, 255}  // Magenta
+    };
+
+    // Render pillars
+    for (uint8_t side = 0; side < 2; side++)
+    {
+      for (uint8_t col = 0; col < 4; col++)
+      {
+        uint8_t pillarIndex = side * 4 + col;
+        uint8_t height = pillars[pillarIndex];
+        RGB color = pillarColors[pillarIndex];
+
+        for (uint8_t row = 0; row < 4; row++)
+        {
+          // Fill from bottom up based on height
+          if ((3 - row) < height)
+          {
+            if (side == 0)
+            {
+              frame.left[row][col] = color;
+            }
+            else
+            {
+              frame.right[row][col] = color;
+            }
+          }
+          else
+          {
+            if (side == 0)
+            {
+              frame.left[row][col] = {0, 0, 0};
+            }
+            else
+            {
+              frame.right[row][col] = {0, 0, 0};
+            }
+          }
+        }
       }
     }
   }
@@ -544,6 +904,30 @@ private:
 
         // Create X pattern: diagonal from top-left to bottom-right and top-right to bottom-left
         if (x == y || x + y == 3)
+        {
+          intensity = 255;
+        }
+
+        frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+        frame.right[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+      }
+    }
+  }
+  static void renderBigEyes(MaskFrame &frame)
+  {
+    uint8_t r = 255;
+    uint8_t g = 255;
+    uint8_t b = 255;
+
+    for (uint8_t y = 0; y < 4; y++)
+    {
+      for (uint8_t x = 0; x < 4; x++)
+      {
+        uint8_t pixelIndex = y * 4 + x;
+        uint8_t intensity = 0;
+
+        if (pixelIndex == 1 || pixelIndex == 2 || pixelIndex == 4 || pixelIndex == 7 ||
+            pixelIndex == 8 || pixelIndex == 11 || pixelIndex == 13 || pixelIndex == 14)
         {
           intensity = 255;
         }
@@ -1400,7 +1784,6 @@ void loop()
   }
   buttonHandler.update(deltaTime);
   ledController.present(frame);
-  
 
   delay(10); // Small delay for stability
 }
@@ -1417,7 +1800,7 @@ void onButton1Tap()
     {
       return;
     }
-    
+
     switch (modeManager.getMode())
     {
     case Core::Mode::ACTIVE:
@@ -1449,7 +1832,7 @@ void onButton2Tap()
     switch (modeManager.getMode())
     {
     case Core::Mode::ACTIVE:
-    if (wakeUp())
+      if (wakeUp())
       {
         return;
       }
