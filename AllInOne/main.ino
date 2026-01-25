@@ -137,7 +137,9 @@ public:
     Music,
     Flashing,
     Dead,
+    Check,
     BigEyes,
+    BinaryClock,
     Matrix,
     Loading,
     SIZE
@@ -183,8 +185,14 @@ public:
     case Type::Dead:
       renderDead(frame);
       break;
+    case Type::Check:
+      renderCheck(frame);
+      break;
     case Type::BigEyes:
       renderBigEyes(frame);
+      break;
+    case Type::BinaryClock:
+      renderBinaryClock(frame, 255, 255, 255, millis());
       break;
     case Type::Matrix:
       renderMatrix(frame);
@@ -736,26 +744,67 @@ private:
     uint8_t g = 20;
     uint8_t b = 147;
 
+    // Glitter color configuration - easy to modify
+    static const uint8_t GLITTER_R = 240; // Red component of glitter
+    static const uint8_t GLITTER_G = 0; // Green component of glitter
+    static const uint8_t GLITTER_B = 100; // Blue component of glitter
+
+    static uint32_t lastGlitterTime = 0;
+    static bool glitterPositions[32] = {false}; // Track glitter state for all pixels (16 left + 16 right)
+    static const uint32_t GLITTER_UPDATE_INTERVAL = 100; // Update glitter every 100ms
+    static const uint8_t GLITTER_CHANCE = 3; // 30% chance per update (out of 10)
+
+    uint32_t currentTime = millis();
+
+    // Update glitter positions
+    if (currentTime - lastGlitterTime > GLITTER_UPDATE_INTERVAL)
+    {
+      lastGlitterTime = currentTime;
+      
+      for (uint8_t i = 0; i < 32; i++)
+      {
+        glitterPositions[i] = (random(0, 10) < GLITTER_CHANCE);
+      }
+    }
+
     for (uint8_t y = 0; y < 4; y++)
     {
       for (uint8_t x = 0; x < 4; x++)
       {
         uint8_t pixelIndex = y * 4 + x;
-        uint8_t intensity = 0;
 
-        if (pixelIndex == 0 || pixelIndex == 3 || pixelIndex == 4 || pixelIndex == 5 ||
-            pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 9 ||
-            pixelIndex == 10)
-        {
-          intensity = 255;
-        }
-        else if (pixelIndex == 8 || pixelIndex == 11 || pixelIndex == 13 || pixelIndex == 14)
-        {
-          intensity = 255;
-        }
+        // Check if this pixel is part of the heart pattern
+        bool isHeartPixel = (pixelIndex == 0 || pixelIndex == 3 || pixelIndex == 4 || pixelIndex == 5 ||
+                             pixelIndex == 6 || pixelIndex == 7 || pixelIndex == 8 || pixelIndex == 9 ||
+                             pixelIndex == 10 || pixelIndex == 11 || pixelIndex == 13 || pixelIndex == 14);
 
-        frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
-        frame.right[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+        if (isHeartPixel)
+        {
+          // Check glitter for left eye
+          if (glitterPositions[pixelIndex])
+          {
+            frame.left[y][x] = {GLITTER_R, GLITTER_G, GLITTER_B};
+          }
+          else
+          {
+            frame.left[y][x] = {r, g, b};
+          }
+          
+          // Check glitter for right eye
+          if (glitterPositions[pixelIndex + 16])
+          {
+            frame.right[y][x] = {GLITTER_R, GLITTER_G, GLITTER_B};
+          }
+          else
+          {
+            frame.right[y][x] = {r, g, b};
+          }
+        }
+        else
+        {
+          frame.left[y][x] = {0, 0, 0};
+          frame.right[y][x] = {0, 0, 0};
+        }
       }
     }
   }
@@ -913,6 +962,30 @@ private:
       }
     }
   }
+  static void renderCheck(MaskFrame &frame)
+  {
+    uint8_t r = 0;
+    uint8_t g = 255;
+    uint8_t b = 0;
+    
+    for (uint8_t y = 0; y < 4; y++)
+    {
+      for (uint8_t x = 0; x < 4; x++)
+      {
+        uint8_t pixelIndex = y * 4 + x;
+        uint8_t intensity = 0;
+
+        // Create check mark pattern
+        if (pixelIndex == 0 || pixelIndex == 5 || pixelIndex == 10 || pixelIndex == 7)
+        {
+          intensity = 255;
+        }
+
+        frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+        frame.right[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+      }
+    }
+  }
   static void renderBigEyes(MaskFrame &frame)
   {
     uint8_t r = 255;
@@ -934,6 +1007,67 @@ private:
 
         frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
         frame.right[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
+      }
+    }
+  }
+  static void renderBinaryClock(MaskFrame &frame, uint8_t r, uint8_t g, uint8_t b, uint32_t currentTime)
+  {
+    // Get current time components
+    uint8_t hours = (currentTime / 3600000) % 24;    // Hours (0-23)
+    uint8_t minutes = (currentTime / 60000) % 60;    // Minutes (0-59)
+    uint8_t seconds = (currentTime / 1000) % 60;     // Seconds (0-59)
+    uint8_t centiseconds = (currentTime / 100) % 10; // Centiseconds (0-9), updates every 100ms
+
+    // Define colors for each time component
+    uint8_t hourR = 255, hourG = 0, hourB = 0;      // Red for hours
+    uint8_t minR = 0, minG = 255, minB = 0;         // Green for minutes
+    uint8_t secR = 0, secG = 0, secB = 255;         // Blue for seconds
+    uint8_t centiR = 255, centiG = 255, centiB = 0; // Yellow for centiseconds
+
+    // Clear frame
+    frame.clear();
+
+    // Render hours (5 bits) on left eye, columns 0-1
+    for (uint8_t bit = 0; bit < 5; bit++)
+    {
+      if (hours & (1 << bit))
+      {
+        uint8_t col = (bit < 4) ? 1 : 0; // Column 1 for bits 0-3, column 0 for bit 4
+        uint8_t row = 3 - (bit % 4);     // Bottom to top (row 3 = LSB, row 0 = bit 3)
+        frame.left[row][col] = {hourR, hourG, hourB};
+      }
+    }
+
+    // Render minutes (6 bits) on left eye, columns 2-3
+    for (uint8_t bit = 0; bit < 6; bit++)
+    {
+      if (minutes & (1 << bit))
+      {
+        uint8_t col = (bit < 4) ? 3 : 2; // Column 3 for bits 0-3, column 2 for bits 4-5
+        uint8_t row = 3 - (bit % 4);     // Bottom to top
+        frame.left[row][col] = {minR, minG, minB};
+      }
+    }
+
+    // Render seconds (6 bits) on right eye, columns 0-1
+    for (uint8_t bit = 0; bit < 6; bit++)
+    {
+      if (seconds & (1 << bit))
+      {
+        uint8_t col = (bit < 4) ? 1 : 0; // Column 1 for bits 0-3, column 0 for bits 4-5
+        uint8_t row = 3 - (bit % 4);     // Bottom to top
+        frame.right[row][col] = {secR, secG, secB};
+      }
+    }
+
+    // Render centiseconds (4 bits) on right eye, columns 2-3
+    for (uint8_t bit = 0; bit < 4; bit++)
+    {
+      if (centiseconds & (1 << bit))
+      {
+        uint8_t col = 2 + (bit / 4); // Column 2 for bits 0-3, column 3 would be for bit 4 (not used)
+        uint8_t row = 3 - (bit % 4); // Bottom to top
+        frame.right[row][col] = {centiR, centiG, centiB};
       }
     }
   }
@@ -1305,7 +1439,9 @@ namespace Core
   class ExpressionManager
   {
   private:
-    uint32_t lastUpdateTime = 0;
+    uint32_t expressionTimer = 0;
+    uint32_t nextExpressionTime = 0;
+    bool expressionTaggedForChange = false;
     Expressions::Type currentExpression;
     Expressions::Type quickExpression;
     MaskFrame *frame;
@@ -1408,10 +1544,35 @@ namespace Core
     Expressions::Type getCurrentExpression() const { return currentExpression; }
     Expressions::Type getQuickExpression() const { return quickExpression; }
 
+    void setForChange(uint32_t timeFromNow, uint32_t maxTime = 10000)
+    {
+      if (nextExpressionTime < expressionTimer)
+      {
+        nextExpressionTime = expressionTimer + timeFromNow > expressionTimer + maxTime ? expressionTimer + maxTime : expressionTimer + timeFromNow;
+      }
+      else
+      {
+        nextExpressionTime = nextExpressionTime + timeFromNow > expressionTimer + maxTime ? expressionTimer + maxTime : nextExpressionTime + timeFromNow;
+      }
+      expressionTaggedForChange = true;
+    }
+
     void updateFrame()
     {
       if (frame != nullptr)
         Expressions::render(currentExpression, *frame);
+    }
+
+    void update(uint32_t deltaTime)
+    {
+      expressionTimer += deltaTime;
+      updateFrame();
+
+      if (expressionTaggedForChange && expressionTimer >= nextExpressionTime)
+      {
+        quickSwitch();
+        expressionTaggedForChange = false;
+      }
     }
   };
 }
@@ -1735,6 +1896,7 @@ void setup()
   Serial.begin(9600);
   // Serial.println("System Initializing...");
   delay(1000); // Give serial time to stabilize
+
   // Initialize button handler with pins
   buttonHandler.begin(BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN);
 
@@ -1770,7 +1932,7 @@ void loop()
     frame.clear();
     break;
   case Core::Mode::ACTIVE:
-    expressionManager.updateFrame();
+    expressionManager.update(deltaTime);
     break;
   case Core::Mode::MANUAL:
     // In manual mode, expression is controlled by button actions
@@ -1861,6 +2023,7 @@ void onButton1DoubleTap()
   Serial.println("Button 1: Double Tap");
   if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
   {
+    setForQuickExpressionChange();
   }
   else
   {
@@ -1969,4 +2132,9 @@ void cycleBrightness()
   }
 
   ledController.setBrightness(BRIGHTNESS_LEVELS[nextIndex]);
+}
+
+void setForQuickExpressionChange()
+{
+  expressionManager.setForChange(2000, 15000);
 }
