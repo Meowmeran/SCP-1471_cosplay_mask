@@ -1,5 +1,9 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <ESP8266WebServer.h>
+#include <DNSServer.h>
 #include <cstdint>
 #include <functional>
 
@@ -330,7 +334,16 @@ private:
         }
         else
         {
-          if (pixelIndex == 5 + pixelShift || pixelIndex == 6 + pixelShift || pixelIndex == 9 + pixelShift || pixelIndex == 10 + pixelShift)
+          // Check boundaries before applying pixelShift
+          int16_t shiftedPixel1 = 5 + pixelShift;
+          int16_t shiftedPixel2 = 6 + pixelShift;
+          int16_t shiftedPixel3 = 9 + pixelShift;
+          int16_t shiftedPixel4 = 10 + pixelShift;
+
+          if ((shiftedPixel1 >= 0 && shiftedPixel1 < 16 && pixelIndex == shiftedPixel1) ||
+              (shiftedPixel2 >= 0 && shiftedPixel2 < 16 && pixelIndex == shiftedPixel2) ||
+              (shiftedPixel3 >= 0 && shiftedPixel3 < 16 && pixelIndex == shiftedPixel3) ||
+              (shiftedPixel4 >= 0 && shiftedPixel4 < 16 && pixelIndex == shiftedPixel4))
           {
             intensity = 255;
           }
@@ -356,7 +369,6 @@ private:
     uint16_t blinkingFrequency = 5000;
     uint32_t blinkingCycle = currentTime % blinkingFrequency;
     bool isBlinking = blinkingCycle < blinkPeriod;
-    bool hasBlinked = false;
 
     for (uint8_t y = 0; y < 4; y++)
     {
@@ -370,10 +382,6 @@ private:
           if (pixelIndex == 8 || pixelIndex == 9 || pixelIndex == 10 || pixelIndex == 11)
           {
             intensity = 255;
-          }
-          if (!hasBlinked && blinkingCycle < 50)
-          {
-            hasBlinked = true;
           }
         }
         else
@@ -439,11 +447,6 @@ private:
         {
           intensity = 255;
         }
-        /*
-        else if (pixelIndex == 9 - 4 || pixelIndex == 9 - 1 || pixelIndex == 9 + 1 || pixelIndex == 9 + 4)
-        {
-          intensity = 0;
-        }*/
 
         frame.left[y][x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
         frame.right[y][3 - x] = {(uint8_t)(r * intensity / 255), (uint8_t)(g * intensity / 255), (uint8_t)(b * intensity / 255)};
@@ -699,7 +702,16 @@ private:
         }
         else
         {
-          if (pixelIndex == 5 + pixelShift || pixelIndex == 6 + pixelShift || pixelIndex == 9 + pixelShift || pixelIndex == 10 + pixelShift)
+          // Check boundaries before applying pixelShift
+          int16_t shiftedPixel1 = 5 + pixelShift;
+          int16_t shiftedPixel2 = 6 + pixelShift;
+          int16_t shiftedPixel3 = 9 + pixelShift;
+          int16_t shiftedPixel4 = 10 + pixelShift;
+
+          if ((shiftedPixel1 >= 0 && shiftedPixel1 < 16 && pixelIndex == shiftedPixel1) ||
+              (shiftedPixel2 >= 0 && shiftedPixel2 < 16 && pixelIndex == shiftedPixel2) ||
+              (shiftedPixel3 >= 0 && shiftedPixel3 < 16 && pixelIndex == shiftedPixel3) ||
+              (shiftedPixel4 >= 0 && shiftedPixel4 < 16 && pixelIndex == shiftedPixel4))
           {
             intensity = 255;
           }
@@ -1012,10 +1024,12 @@ private:
   }
   static void renderBinaryClock(MaskFrame &frame, uint8_t r, uint8_t g, uint8_t b, uint32_t currentTime)
   {
-    // Get current time components
-    uint8_t hours = (currentTime / 3600000) % 24;    // Hours (0-23)
-    uint8_t minutes = (currentTime / 60000) % 60;    // Minutes (0-59)
-    uint8_t seconds = (currentTime / 1000) % 60;     // Seconds (0-59)
+    // Get current time components (Note: This shows millis() time, not real clock time)
+    // For real time, integrate RTC module
+    unsigned long totalSeconds = currentTime / 1000;
+    uint8_t hours = (totalSeconds / 3600) % 24;      // Hours (0-23)
+    uint8_t minutes = (totalSeconds / 60) % 60;      // Minutes (0-59)
+    uint8_t seconds = totalSeconds % 60;             // Seconds (0-59)
     uint8_t centiseconds = (currentTime / 100) % 10; // Centiseconds (0-9), updates every 100ms
 
     // Define colors for each time component
@@ -1228,6 +1242,493 @@ private:
     }
   }
 };
+
+// ============================================
+// WEB SERVER & CAPTIVE PORTAL MANAGER
+// ============================================
+
+class WebServerManager
+{
+private:
+  ESP8266WebServer server;
+  DNSServer dnsServer;
+  bool isInitialized = false;
+  static const uint16_t DNS_PORT = 53;
+  static const uint16_t HTTP_PORT = 80;
+  static const char *AP_SSID;
+  static const char *AP_PASSWORD;
+  static const char *MDNS_NAME;
+
+  // Callback to be invoked when an expression is selected
+  std::function<void(Expressions::Type)> expressionCallback;
+
+public:
+  WebServerManager() : server(HTTP_PORT) {}
+
+  void begin(std::function<void(Expressions::Type)> onExpressionChange)
+  {
+    if (isInitialized)
+      return;
+
+    expressionCallback = onExpressionChange;
+
+    // Configure Access Point
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD);
+
+    IPAddress apIP(192, 168, 4, 1);
+    IPAddress gateway(192, 168, 4, 1);
+    IPAddress subnet(255, 255, 255, 0);
+    WiFi.softAPConfig(apIP, gateway, subnet);
+
+    // Start mDNS
+    if (!MDNS.begin(MDNS_NAME))
+    {
+      Serial.println("[WiFi] mDNS responder failed to start");
+    }
+    else
+    {
+      Serial.println("[WiFi] mDNS responder started: mask.local");
+      MDNS.addService("http", "tcp", 80);
+    }
+
+    // Start DNS server (Captive Portal)
+    dnsServer.start(DNS_PORT, "*", apIP);
+    Serial.println("[WiFi] Captive Portal DNS server started");
+
+    // Setup web server routes
+    setupRoutes();
+
+    server.begin();
+    Serial.println("[WiFi] Web server started on http://mask.local or http://192.168.4.1");
+    Serial.print("[WiFi] Connect to AP: ");
+    Serial.println(AP_SSID);
+
+    isInitialized = true;
+  }
+
+  void update()
+  {
+    if (!isInitialized)
+      return;
+
+    dnsServer.processNextRequest();
+    server.handleClient();
+    MDNS.update();
+  }
+
+  bool isRunning() const { return isInitialized; }
+
+private:
+  void setupRoutes()
+  {
+    // Root path - serve captive portal HTML
+    server.on("/", HTTP_GET, [this]()
+              { server.send(200, "text/html", getHtmlInterface()); });
+
+    // API endpoint to set expression
+    server.on("/api/expression", HTTP_POST, [this]()
+              {
+      if (!server.hasArg("type"))
+      {
+        server.send(400, "application/json", "{\"error\":\"Missing 'type' parameter\"}");
+        return;
+      }
+
+      String typeStr = server.arg("type");
+      Expressions::Type expressionType = parseExpressionType(typeStr);
+
+      if (expressionCallback)
+      {
+        expressionCallback(expressionType);
+      }
+
+      server.send(200, "application/json", "{\"status\":\"ok\"}"); });
+
+    // API endpoint to get current status
+    server.on("/api/status", HTTP_GET, [this]()
+              { server.send(200, "application/json", "{\"status\":\"connected\"}"); });
+
+    // Catch-all for captive portal (redirect to root)
+    server.onNotFound([this]()
+                      {
+      server.sendHeader("Location", "http://mask.local/", true);
+      server.send(302, "text/plain", ""); });
+  }
+
+  Expressions::Type parseExpressionType(const String &typeStr)
+  {
+    if (typeStr == "neutral")
+      return Expressions::Type::Neutral;
+    if (typeStr == "happy")
+      return Expressions::Type::Happy;
+    if (typeStr == "sad")
+      return Expressions::Type::Sad;
+    if (typeStr == "angry")
+      return Expressions::Type::Angry;
+    if (typeStr == "surprised")
+      return Expressions::Type::Surprised;
+    if (typeStr == "wink")
+      return Expressions::Type::Wink;
+    if (typeStr == "shy")
+      return Expressions::Type::Shy;
+    if (typeStr == "lovely")
+      return Expressions::Type::Lovely;
+    if (typeStr == "rainbow")
+      return Expressions::Type::Rainbow;
+    if (typeStr == "music")
+      return Expressions::Type::Music;
+    if (typeStr == "flashing")
+      return Expressions::Type::Flashing;
+    if (typeStr == "dead")
+      return Expressions::Type::Dead;
+    if (typeStr == "check")
+      return Expressions::Type::Check;
+    if (typeStr == "bigeyes")
+      return Expressions::Type::BigEyes;
+    if (typeStr == "binaryclock")
+      return Expressions::Type::BinaryClock;
+    if (typeStr == "matrix")
+      return Expressions::Type::Matrix;
+    if (typeStr == "loading")
+      return Expressions::Type::Loading;
+
+    return Expressions::Type::Neutral;
+  }
+
+  String getHtmlInterface()
+  {
+    return R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCP-1471 Mask Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .expression-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-neutral {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-happy {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-sad {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+
+        .btn-angry {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+        }
+
+        .btn-surprised {
+            background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+            color: white;
+        }
+
+        .btn-wink {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            color: #333;
+        }
+
+        .btn-shy {
+            background: linear-gradient(135deg, #ff9a56 0%, #ff6a88 100%);
+            color: white;
+        }
+
+        .btn-lovely {
+            background: linear-gradient(135deg, #ff6b9d 0%, #c06c84 100%);
+            color: white;
+        }
+
+        .expression-divider {
+            text-align: center;
+            margin: 20px 0;
+            color: #999;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            position: relative;
+        }
+
+        .expression-divider:before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 100%;
+            height: 1px;
+            background: #ddd;
+            z-index: 1;
+        }
+
+        .expression-divider span {
+            background: white;
+            position: relative;
+            z-index: 2;
+            padding: 0 10px;
+        }
+
+        .btn-rainbow {
+            background: linear-gradient(90deg, red, yellow, lime, cyan, blue, magenta, red);
+            color: white;
+        }
+
+        .btn-music {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-flashing {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        .btn-dead {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+        }
+
+        .btn-check {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .btn-bigeyes {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-binaryclock {
+            background: linear-gradient(135deg, #000 0%, #434343 100%);
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .btn-matrix {
+            background: linear-gradient(135deg, #000 0%, #1a1a1a 100%);
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .btn-loading {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            background: #f0f0f0;
+            color: #333;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+                border-radius: 15px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .btn {
+                padding: 12px;
+                font-size: 13px;
+            }
+
+            .expression-grid {
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>😀 SCP-1471</h1>
+            <p>Mask Expression Control</p>
+        </div>
+
+        <div class="expression-grid">
+            <button class="btn btn-neutral" onclick="setExpression('neutral')">Neutral</button>
+            <button class="btn btn-happy" onclick="setExpression('happy')">Happy</button>
+            <button class="btn btn-sad" onclick="setExpression('sad')">Sad</button>
+            <button class="btn btn-angry" onclick="setExpression('angry')">Angry</button>
+            <button class="btn btn-surprised" onclick="setExpression('surprised')">Surprised</button>
+            <button class="btn btn-wink" onclick="setExpression('wink')">Wink</button>
+            <button class="btn btn-shy" onclick="setExpression('shy')">Shy</button>
+            <button class="btn btn-lovely" onclick="setExpression('lovely')">Lovely</button>
+        </div>
+
+        <div class="expression-divider"><span>Misc</span></div>
+
+        <div class="expression-grid">
+            <button class="btn btn-rainbow" onclick="setExpression('rainbow')">Rainbow</button>
+            <button class="btn btn-music" onclick="setExpression('music')">Music</button>
+            <button class="btn btn-flashing" onclick="setExpression('flashing')">Flashing</button>
+            <button class="btn btn-dead" onclick="setExpression('dead')">Dead</button>
+            <button class="btn btn-check" onclick="setExpression('check')">Check</button>
+            <button class="btn btn-bigeyes" onclick="setExpression('bigeyes')">Big Eyes</button>
+            <button class="btn btn-binaryclock" onclick="setExpression('binaryclock')">Binary</button>
+            <button class="btn btn-matrix" onclick="setExpression('matrix')">Matrix</button>
+            <button class="btn btn-loading" onclick="setExpression('loading')">Loading</button>
+        </div>
+
+        <div class="status connected" id="status">Connected</div>
+    </div>
+
+    <script>
+        async function setExpression(type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = 'Loading...';
+            statusEl.classList.remove('connected');
+            statusEl.classList.add('loading');
+
+            try {
+                const response = await fetch('/api/expression', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'type=' + encodeURIComponent(type)
+                });
+
+                if (response.ok) {
+                    statusEl.textContent = 'Expression changed: ' + type.charAt(0).toUpperCase() + type.slice(1);
+                    statusEl.classList.remove('loading');
+                    statusEl.classList.add('connected');
+                } else {
+                    statusEl.textContent = 'Error changing expression';
+                }
+            } catch (error) {
+                statusEl.textContent = 'Connection error';
+                console.error('Error:', error);
+            }
+        }
+
+        // Check connection status on load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/api/status');
+                if (response.ok) {
+                    document.getElementById('status').textContent = 'Connected';
+                    document.getElementById('status').classList.add('connected');
+                }
+            } catch (error) {
+                console.error('Status check failed:', error);
+            }
+        });
+    </script>
+</body>
+</html>
+)rawliteral";
+  }
+};
+
+// Define static constants
+const char *WebServerManager::AP_SSID = "SCP-1471-Mask";
+const char *WebServerManager::AP_PASSWORD = "MaskControl123";
+const char *WebServerManager::MDNS_NAME = "mask";
 
 // ============================================
 // LED CONTROLLER
@@ -1693,12 +2194,14 @@ namespace Core
 
 #define MAX_BUTTONS 3
 #define MAX_ACTIONS 12
+#define INVALID_PIN 0xFF
 
 class ButtonHandler
 {
 public:
   enum class ButtonEvent
   {
+    Press, // Fires immediately when button is pressed
     Tap,
     DoubleTap,
     Hold,
@@ -1708,17 +2211,17 @@ public:
   using ActionCallback = void (*)();
 
   ButtonHandler(uint32_t doubleTapThreshold = 300, uint32_t holdThreshold = 500)
-      : doubleTapThreshold(doubleTapThreshold), holdThreshold(holdThreshold), debounceDelay(50)
+      : doubleTapThreshold(doubleTapThreshold), holdThreshold(holdThreshold), debounceDelay(20) // Reduced for faster response
   {
     for (int i = 0; i < MAX_ACTIONS; i++)
     {
-      actions[i].buttonPin = 0xFF;
+      actions[i].buttonPin = INVALID_PIN;
       actions[i].callback = nullptr;
     }
 
     for (int i = 0; i < MAX_BUTTONS; i++)
     {
-      buttons[i].pin = 0xFF;
+      buttons[i].pin = INVALID_PIN;
     }
   }
 
@@ -1737,7 +2240,7 @@ public:
   {
     for (int i = 0; i < MAX_ACTIONS; ++i)
     {
-      if (actions[i].buttonPin == 0xFF)
+      if (actions[i].buttonPin == INVALID_PIN)
       {
         actions[i].buttonPin = buttonPin;
         actions[i].event = event;
@@ -1756,7 +2259,7 @@ public:
     {
       ButtonState &state = buttons[i];
 
-      if (state.pin == 0xFF)
+      if (state.pin == INVALID_PIN)
         continue;
 
       state.lastChangeTime += deltaTime;
@@ -1795,7 +2298,7 @@ public:
   {
     if (MAX_BUTTONS > 8)
     {
-      Serial.println("getHeldButtons() supports up to 8 buttons only.");
+      // Cannot represent more than 8 buttons with a single byte bitmask
       return 0;
     }
 
@@ -1814,7 +2317,7 @@ public:
 private:
   struct ButtonState
   {
-    uint8_t pin = 0xFF;
+    uint8_t pin = INVALID_PIN;
     bool isPressed = false;
     bool lastPhysicalState = false;
     uint32_t pressTime = 0;
@@ -1827,7 +2330,7 @@ private:
 
   struct Action
   {
-    uint8_t buttonPin = 0xFF;
+    uint8_t buttonPin = INVALID_PIN;
     ButtonEvent event;
     ActionCallback callback = nullptr;
   };
@@ -1867,7 +2370,7 @@ private:
     // Check if any OTHER button is currently held
     for (int i = 0; i < MAX_BUTTONS; ++i)
     {
-      if (buttons[i].pin != 0xFF && buttons[i].pin != buttonPin &&
+      if (buttons[i].pin != INVALID_PIN && buttons[i].pin != buttonPin &&
           buttons[i].isPressed && buttons[i].pressTime >= holdThreshold)
       {
         // Mark that held button as part of a combination
@@ -1892,7 +2395,7 @@ private:
     for (int i = 0; i < MAX_BUTTONS; ++i)
     {
       ButtonState &state = buttons[i];
-      if (state.pin == 0xFF)
+      if (state.pin == INVALID_PIN)
         continue;
 
       bool physicalState = (digitalRead(state.pin) == LOW);
@@ -1917,7 +2420,8 @@ private:
             state.pressTime = 0;
             state.holdTriggered = false;
             state.combinationTriggered = false;
-            // Optional: triggerActions(state.pin, ButtonEvent::Press);
+            // Trigger instant press event for fast game response
+            triggerActions(state.pin, ButtonEvent::Press);
           }
           else // BUTTON RELEASED
           {
@@ -2029,9 +2533,10 @@ namespace Game
       // Initialize game state
       isStarted = false; // Wait for user input to start
       isGameOver = false;
-      direction = 1;            // Start moving right
-      score = (level - 1) * 32; // Base score on level
-      gameSpeed = level;        // Initial speed based on level
+      direction = 1; // Start moving right
+      // Base score on level, prevent overflow
+      score = (level > 0 && level - 1 <= UINT16_MAX / 32) ? (level - 1) * 32 : 0;
+      gameSpeed = level; // Initial speed based on level
       lastUpdateTime = 0;
       showLeaderboard = false;
       // Initialize snake segments
@@ -2075,7 +2580,8 @@ namespace Game
       if (isStarted && !isGameOver)
       {
         lastUpdateTime += deltaTime;
-        uint32_t speedInterval = 1000 / gameSpeed; // Speed increases with level
+        // Prevent division by zero
+        uint32_t speedInterval = (gameSpeed > 0) ? (1000 / gameSpeed) : 1000;
 
         if (lastUpdateTime >= speedInterval)
         {
@@ -2239,7 +2745,11 @@ namespace Game
       // Check for food consumption
       if (foodLocation == (newY * 8 + newX))
       {
-        score++;
+        // Prevent score overflow
+        if (score < UINT16_MAX)
+        {
+          score++;
+        }
         if (!placeFood())
         {
           initializeGame(++gameSpeed); // Restart if no space for food
@@ -2494,7 +3004,8 @@ namespace Game
     void update(uint32_t deltaTime)
     {
       lastUpdateTime += deltaTime;
-      uint32_t speedInterval = 1000 / stats.gameSpeed; // Speed increases with level
+      // Prevent division by zero
+      uint32_t speedInterval = (stats.gameSpeed > 0) ? (1000 / stats.gameSpeed) : 1000;
       if (lastUpdateTime >= speedInterval)
       {
         lastUpdateTime = 0;
@@ -2611,9 +3122,9 @@ namespace Game
   };
 }
 
-  // ============================================
-  // MAIN APPLICATION CODE
-  // ============================================
+// ============================================
+// MAIN APPLICATION CODE
+// ============================================
 
 #define BUTTON1_PIN D1
 #define BUTTON2_PIN D2
@@ -2623,364 +3134,399 @@ namespace Game
 #define NEO_NUMPIXEL 32     // Number of LEDs per side
 #define NEO_NUMPIXEL_PER 16 // Number of LEDs per side
 
-  // Global instances
-  const unsigned long DOUBLE_TAP_TIME = 300;               // milliseconds
-  const unsigned long HOLD_TIME = 700;                     // milliseconds
-  ButtonHandler buttonHandler(DOUBLE_TAP_TIME, HOLD_TIME); // 300ms for double tap, 700ms for hold
-  MaskFrame frame = MaskFrame();
-  Core::ModeManager modeManager = Core::ModeManager();
-  Core::ExpressionManager expressionManager = Core::ExpressionManager(&frame);
-  LedController ledController = LedController(NEO_PIN, NEO_NUMPIXEL);
+// Global instances
+constexpr unsigned long DOUBLE_TAP_TIME = 300;           // milliseconds
+constexpr unsigned long HOLD_TIME = 700;                 // milliseconds
+ButtonHandler buttonHandler(DOUBLE_TAP_TIME, HOLD_TIME); // 300ms for double tap, 700ms for hold
+MaskFrame frame = MaskFrame();
+Core::ModeManager modeManager = Core::ModeManager();
+Core::ExpressionManager expressionManager = Core::ExpressionManager(&frame);
+LedController ledController = LedController(NEO_PIN, NEO_NUMPIXEL);
+WebServerManager webServer;
 
-  Game::SnakeGame snakeGame = Game::SnakeGame();
-  Game::TowerGame towerGame = Game::TowerGame();
+Game::SnakeGame snakeGame = Game::SnakeGame();
+Game::TowerGame towerGame = Game::TowerGame();
 
-  // Forward declarations
-  void onButton1Tap();
-  void onButton1DoubleTap();
-  void onButton1Hold();
-  void onButton1Release();
-  void onButton2Tap();
-  void onButton2DoubleTap();
-  void onButton2Hold();
-  void onButton2Release();
+// Forward declarations
+void onButton1Press();
+void onButton1Tap();
+void onButton1DoubleTap();
+void onButton1Hold();
+void onButton1Release();
+void onButton2Press();
+void onButton2Tap();
+void onButton2DoubleTap();
+void onButton2Hold();
+void onButton2Release();
 
-  void setup()
+void setup()
+{
+  Serial.begin(9600);
+  // Serial.println("System Initializing...");
+  delay(1000); // Give serial time to stabilize
+
+  // Initialize random seed for better randomness
+  randomSeed(analogRead(A0));
+
+  // Initialize button handler with pins
+  buttonHandler.begin(BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN);
+
+  // Register button actions
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Press, onButton1Press);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Tap, onButton1Tap);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton1DoubleTap);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Hold, onButton1Hold);
+  buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Release, onButton1Release);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Press, onButton2Press);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Tap, onButton2Tap);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton2DoubleTap);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Hold, onButton2Hold);
+  buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Release, onButton2Release);
+
+  ledController.begin();
+  ledController.setBrightness(5);
+
+  frame.clear();
+  expressionManager.setExpression(Expressions::Type::Neutral);
+  modeManager.setMode(Core::Mode::ACTIVE);
+
+  webServer.begin([](Expressions::Type type)
+                  { expressionManager.setExpression(type); });
+}
+
+unsigned long lastUpdate = 0;
+
+void loop()
+{
+  unsigned long currentTime = millis();
+  uint32_t deltaTime = currentTime - lastUpdate; // Time since last update
+  lastUpdate = currentTime;
+
+  switch (modeManager.getMode())
   {
-    Serial.begin(9600);
-    // Serial.println("System Initializing...");
-    delay(1000); // Give serial time to stabilize
-
-    // Initialize button handler with pins
-    buttonHandler.begin(BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN);
-
-    // Register button actions
-    buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Tap, onButton1Tap);
-    buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton1DoubleTap);
-    buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Hold, onButton1Hold);
-    buttonHandler.registerAction(BUTTON1_PIN, ButtonHandler::ButtonEvent::Release, onButton1Release);
-    buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Tap, onButton2Tap);
-    buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::DoubleTap, onButton2DoubleTap);
-    buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Hold, onButton2Hold);
-    buttonHandler.registerAction(BUTTON2_PIN, ButtonHandler::ButtonEvent::Release, onButton2Release);
-
-    ledController.begin();
-    ledController.setBrightness(5);
-
+  case Core::Mode::OFF:
     frame.clear();
+    break;
+  case Core::Mode::ACTIVE:
+    expressionManager.update(deltaTime);
+    break;
+  case Core::Mode::MANUAL:
+    // In manual mode, expression is controlled by button actions
+    break;
+  case Core::Mode::MODE_SELECTION:
+    modeManager.render(frame);
+    break;
+  case Core::Mode::SNAKEGAME:
+    snakeGame.update(deltaTime);
+    snakeGame.render(frame);
+    break;
+  case Core::Mode::TOWERGAME:
+    towerGame.update(deltaTime);
+    towerGame.render(frame);
+    break;
+  case Core::Mode::ERROR:
+    ledController.present(getErrorFrame());
+    break;
+  default:
     expressionManager.setExpression(Expressions::Type::Neutral);
-    modeManager.setMode(Core::Mode::ACTIVE);
+    break;
   }
+  buttonHandler.update(deltaTime);
+  ledController.present(frame);
+  webServer.update();
 
-  unsigned long lastUpdate = 0;
+  delay(10); // Small delay for stability
+}
 
-  void loop()
+// --- BUTTON ACTION HANDLERS ---
+// Press handlers (instant response for games)
+void onButton1Press()
+{
+  // Instant response for games - fires immediately on press
+  switch (modeManager.getMode())
   {
-    unsigned long currentTime = millis();
-    uint32_t deltaTime = currentTime - lastUpdate; // Time since last update
-    lastUpdate = currentTime;
+  case Core::Mode::SNAKEGAME:
+    snakeGame.leftButtonAction();
+    break;
+  case Core::Mode::TOWERGAME:
+    towerGame.leftButtonAction();
+    break;
+  default:
+    // No instant action for other modes
+    break;
+  }
+}
+
+void onButton2Press()
+{
+  // Instant response for games - fires immediately on press
+  switch (modeManager.getMode())
+  {
+  case Core::Mode::SNAKEGAME:
+    snakeGame.rightButtonAction();
+    break;
+  case Core::Mode::TOWERGAME:
+    towerGame.rightButtonAction();
+    break;
+  default:
+    // No instant action for other modes
+    break;
+  }
+}
+
+// Tap handlers
+void onButton1Tap()
+{
+  Serial.println("Button 1: Tap");
+
+  if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
+  {
+    if (wakeUp())
+    {
+      return;
+    }
 
     switch (modeManager.getMode())
     {
-    case Core::Mode::OFF:
-      frame.clear();
-      break;
     case Core::Mode::ACTIVE:
-      expressionManager.update(deltaTime);
-      break;
-    case Core::Mode::MANUAL:
-      // In manual mode, expression is controlled by button actions
+      expressionManager.nextNormalExpression();
       break;
     case Core::Mode::MODE_SELECTION:
-      modeManager.render(frame);
+      modeManager.selectNextMode();
+      break;
+    default:
+      break;
+    }
+  }
+  else // Button 2 is held
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+    case Core::Mode::MANUAL:
+      cycleBrightness();
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void onButton2Tap()
+{
+  Serial.println("Button 2: Tap");
+  if (!buttonHandler.isButtonHeld(BUTTON1_PIN))
+  {
+    if (wakeUp())
+    {
+      return;
+    }
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.previousNormalExpression();
+      break;
+    case Core::Mode::MODE_SELECTION:
+      modeManager.selectPreviousMode();
+      break;
+    default:
+      break;
+    }
+  }
+  else // Button 1 is held
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+    case Core::Mode::MANUAL:
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+// Double tap handlers
+void onButton1DoubleTap()
+{
+  Serial.println("Button 1: Double Tap");
+  if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      setForQuickExpressionChange();
+      break;
+    case Core::Mode::MODE_SELECTION:
+      if (!modeManager.confirmSelectedMode())
+      {
+        modeManager.setMode(Core::Mode::OFF); // Invalid selection, turn off
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  else
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.nextMiscExpression();
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
+void onButton2DoubleTap()
+{
+  Serial.println("Button 2: Double Tap");
+  if (!buttonHandler.isButtonHeld(BUTTON1_PIN))
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.quickSwitch();
+      break;
+
+    default:
+      break;
+    }
+  }
+  else
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.previousMiscExpression();
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
+// Hold handlers
+void onButton1Hold()
+{
+  Serial.println("Button 1: Hold");
+  if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
+  {
+    // Button 2 is not held
+  }
+  else
+  {
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+    case Core::Mode::MANUAL:
+      modeManager.setMode(Core::Mode::MODE_SELECTION);
       break;
     case Core::Mode::SNAKEGAME:
-      snakeGame.update(deltaTime);
-      snakeGame.render(frame);
+      snakeGame.pauseGame();
+      modeManager.setMode(Core::Mode::MODE_SELECTION);
       break;
     case Core::Mode::TOWERGAME:
-
-      break;
-    case Core::Mode::ERROR:
-      ledController.present(getErrorFrame());
-      break;
-    default:
-      expressionManager.setExpression(Expressions::Type::Neutral);
-      break;
-    }
-    buttonHandler.update(deltaTime);
-    ledController.present(frame);
-
-    delay(10); // Small delay for stability
-  }
-
-  // --- BUTTON ACTION HANDLERS ---
-  // Tap handlers
-  void onButton1Tap()
-  {
-    Serial.println("Button 1: Tap");
-
-    if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
-    {
-      if (wakeUp())
-      {
-        return;
-      }
-
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-        expressionManager.nextNormalExpression();
-        break;
-      case Core::Mode::MODE_SELECTION:
-        modeManager.selectNextMode();
-        break;
-      default:
-        break;
-      }
-    }
-    else // Button 2 is held
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-      case Core::Mode::MANUAL:
-        cycleBrightness();
-        break;
-      default:
-        break;
-      }
-    }
-  }
-
-  void onButton2Tap()
-  {
-    Serial.println("Button 2: Tap");
-    if (!buttonHandler.isButtonHeld(BUTTON1_PIN))
-    {
-      if (wakeUp())
-      {
-        return;
-      }
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-        expressionManager.previousNormalExpression();
-        break;
-      case Core::Mode::MODE_SELECTION:
-        modeManager.selectPreviousMode();
-        break;
-      default:
-        break;
-      }
-    }
-    else // Button 1 is held
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-      case Core::Mode::MANUAL:
-        break;
-      default:
-        break;
-      }
-    }
-  }
-
-  // Double tap handlers
-  void onButton1DoubleTap()
-  {
-    Serial.println("Button 1: Double Tap");
-    if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-        setForQuickExpressionChange();
-        break;
-      case Core::Mode::MODE_SELECTION:
-        if (!modeManager.confirmSelectedMode())
-        {
-          modeManager.setMode(Core::Mode::OFF); // Invalid selection, turn off
-        }
-        break;
-      default:
-        break;
-      }
-    }
-    else
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-        expressionManager.nextMiscExpression();
-        break;
-
-      default:
-        break;
-      }
-    }
-  }
-
-  void onButton2DoubleTap()
-  {
-    Serial.println("Button 2: Double Tap");
-    if (!buttonHandler.isButtonHeld(BUTTON1_PIN))
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-        expressionManager.quickSwitch();
-        break;
-
-      default:
-        break;
-      }
-    }
-    else
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-        expressionManager.previousMiscExpression();
-        break;
-
-      default:
-        break;
-      }
-    }
-  }
-
-  // Hold handlers
-  void onButton1Hold()
-  {
-    Serial.println("Button 1: Hold");
-    if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
-    {
-      // Button 2 is not held
-    }
-    else
-    {
-      switch (modeManager.getMode())
-      {
-      case Core::Mode::ACTIVE:
-      case Core::Mode::MANUAL:
-      case Core::Mode::SNAKEGAME:
-        snakeGame.pauseGame();
-      case Core::Mode::TOWERGAME:
-        modeManager.setMode(Core::Mode::MODE_SELECTION);
-        break;
-      default:
-        break;
-      }
-    }
-  }
-
-  void onButton2Hold()
-  {
-    Serial.println("Button 2: Hold");
-  }
-
-  // Release handlers
-  void onButton1Release()
-  {
-    Serial.println("Button 1: Release");
-    switch (modeManager.getMode())
-    {
-    case Core::Mode::OFF:
-      wakeUp();
-      break;
-    case Core::Mode::ACTIVE:
-      toggleOnOffMode();
-      break;
-
-    default:
-      break;
-    }
-  }
-
-  void onButton2Release()
-  {
-    Serial.println("Button 2: Release");
-    switch (modeManager.getMode())
-    {
-    case Core::Mode::OFF:
-      break;
-    case Core::Mode::ACTIVE:
-      expressionManager.tagQuickExpression();
+      towerGame.pauseGame();
+      modeManager.setMode(Core::Mode::MODE_SELECTION);
       break;
     default:
       break;
     }
   }
+}
 
-  // --- HELPER FUNCTIONS ---
-  /*void cycleMode()
-  {
-    switch (modeManager.getMode())
-    {
-    case Core::Mode::OFF:
-      wakeUp();
-      break;
-    case Core::Mode::ACTIVE:
-      modeManager.setMode(Core::Mode::MANUAL);
-      break;
-    case Core::Mode::MANUAL:
-      modeManager.setMode(Core::Mode::OFF);
-      break;
-    default:
-      modeManager.setMode(Core::Mode::OFF);
-      break;
-    }
-  }*/
+void onButton2Hold()
+{
+  Serial.println("Button 2: Hold");
+}
 
-  bool wakeUp()
+// Release handlers
+void onButton1Release()
+{
+  Serial.println("Button 1: Release");
+  switch (modeManager.getMode())
   {
-    if (modeManager.isOff())
+  case Core::Mode::OFF:
+    wakeUp();
+    break;
+  case Core::Mode::ACTIVE:
+    toggleOnOffMode();
+    break;
+
+  default:
+    break;
+  }
+}
+
+void onButton2Release()
+{
+  Serial.println("Button 2: Release");
+  switch (modeManager.getMode())
+  {
+  case Core::Mode::OFF:
+    break;
+  case Core::Mode::ACTIVE:
+    expressionManager.tagQuickExpression();
+    break;
+  default:
+    break;
+  }
+}
+
+// --- HELPER FUNCTIONS ---
+
+bool wakeUp()
+{
+  if (modeManager.isOff())
+  {
+    modeManager.setMode(modeManager.getLastMode());
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+void toggleOnOffMode()
+{
+  if (modeManager.isOff())
+  {
+    modeManager.setMode(modeManager.getLastMode());
+  }
+  else
+  {
+    modeManager.setMode(Core::Mode::OFF);
+  }
+}
+
+void cycleBrightness()
+{
+  const uint8_t BRIGHTNESS_LEVELS[] = {1, 5, 10, 20, 40, 80, 160, 255};
+  const uint8_t NUM_LEVELS = sizeof(BRIGHTNESS_LEVELS) / sizeof(BRIGHTNESS_LEVELS[0]);
+
+  uint8_t currentBrightness = ledController.getBrightness();
+  uint8_t nextIndex = 0;
+
+  for (uint8_t i = 0; i < NUM_LEVELS; i++)
+  {
+    if (currentBrightness < BRIGHTNESS_LEVELS[i])
     {
-      modeManager.setMode(modeManager.getLastMode());
-      return true;
+      nextIndex = i;
+      break;
     }
-    else
-    {
-      return false;
-    }
+    nextIndex = (i + 1) % NUM_LEVELS;
   }
 
-  void toggleOnOffMode()
-  {
-    if (modeManager.isOff())
-    {
-      modeManager.setMode(modeManager.getLastMode());
-    }
-    else
-    {
-      modeManager.setMode(Core::Mode::OFF);
-    }
-  }
+  ledController.setBrightness(BRIGHTNESS_LEVELS[nextIndex]);
+}
 
-  void cycleBrightness()
-  {
-    const uint8_t BRIGHTNESS_LEVELS[] = {1, 5, 10, 20, 40, 80, 160, 255};
-    const uint8_t NUM_LEVELS = sizeof(BRIGHTNESS_LEVELS) / sizeof(BRIGHTNESS_LEVELS[0]);
-
-    uint8_t currentBrightness = ledController.getBrightness();
-    uint8_t nextIndex = 0;
-
-    for (uint8_t i = 0; i < NUM_LEVELS; i++)
-    {
-      if (currentBrightness < BRIGHTNESS_LEVELS[i])
-      {
-        nextIndex = i;
-        break;
-      }
-      nextIndex = (i + 1) % NUM_LEVELS;
-    }
-
-    ledController.setBrightness(BRIGHTNESS_LEVELS[nextIndex]);
-  }
-
-  void setForQuickExpressionChange()
-  {
-    expressionManager.setForChange(2000, 15000);
-  }
+void setForQuickExpressionChange()
+{
+  expressionManager.setForChange(2000, 15000);
+}
