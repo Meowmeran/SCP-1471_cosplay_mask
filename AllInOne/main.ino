@@ -746,13 +746,13 @@ private:
 
     // Glitter color configuration - easy to modify
     static const uint8_t GLITTER_R = 240; // Red component of glitter
-    static const uint8_t GLITTER_G = 0; // Green component of glitter
+    static const uint8_t GLITTER_G = 0;   // Green component of glitter
     static const uint8_t GLITTER_B = 100; // Blue component of glitter
 
     static uint32_t lastGlitterTime = 0;
-    static bool glitterPositions[32] = {false}; // Track glitter state for all pixels (16 left + 16 right)
+    static bool glitterPositions[32] = {false};          // Track glitter state for all pixels (16 left + 16 right)
     static const uint32_t GLITTER_UPDATE_INTERVAL = 100; // Update glitter every 100ms
-    static const uint8_t GLITTER_CHANCE = 3; // 30% chance per update (out of 10)
+    static const uint8_t GLITTER_CHANCE = 3;             // 30% chance per update (out of 10)
 
     uint32_t currentTime = millis();
 
@@ -760,7 +760,7 @@ private:
     if (currentTime - lastGlitterTime > GLITTER_UPDATE_INTERVAL)
     {
       lastGlitterTime = currentTime;
-      
+
       for (uint8_t i = 0; i < 32; i++)
       {
         glitterPositions[i] = (random(0, 10) < GLITTER_CHANCE);
@@ -789,7 +789,7 @@ private:
           {
             frame.left[y][x] = {r, g, b};
           }
-          
+
           // Check glitter for right eye
           if (glitterPositions[pixelIndex + 16])
           {
@@ -967,7 +967,7 @@ private:
     uint8_t r = 0;
     uint8_t g = 255;
     uint8_t b = 0;
-    
+
     for (uint8_t y = 0; y < 4; y++)
     {
       for (uint8_t x = 0; x < 4; x++)
@@ -1364,6 +1364,7 @@ namespace Core
     ACTIVE,
     MANUAL,
     OFF,
+    SNAKE,
     ERROR
   };
 
@@ -1412,6 +1413,11 @@ namespace Core
     bool isManual() const
     {
       return currentMode == Mode::MANUAL;
+    }
+
+    bool isSnake() const
+    {
+      return currentMode == Mode::SNAKE;
     }
 
     bool isOff() const
@@ -1861,6 +1867,351 @@ private:
 };
 
 // ============================================
+// SNAKE GAME
+// ============================================
+
+class SnakeGame
+{
+  class SnakeSegment
+  {
+  public:
+    uint8_t x;
+    uint8_t y;
+    SnakeSegment *next;
+
+    SnakeSegment(uint8_t x, uint8_t y)
+        : x(x), y(y), next(nullptr) {}
+    ~SnakeSegment()
+    {
+      for (SnakeSegment *seg = next; seg != nullptr;)
+      {
+        SnakeSegment *nextSeg = seg->next;
+        delete seg;
+        seg = nextSeg;
+      }
+    }
+  };
+
+private:
+  uint32_t lastUpdateTime;
+  SnakeSegment *head;
+  SnakeSegment *tail;
+  uint8_t direction;    // 0=up, 1=right, 2=down, 3=left
+  uint8_t foodLocation; // Encoded as (y * 4 + x), range 0-31
+
+  uint16_t score;
+  uint8_t gameSpeed;
+  bool isStarted;
+  bool isGameOver;
+  bool showLeaderboard;
+
+public:
+  SnakeGame()
+      : lastUpdateTime(0), head(nullptr), tail(nullptr), direction(1),
+        foodLocation(0), score(0), gameSpeed(1), isStarted(false),
+        isGameOver(false), showLeaderboard(false) {}
+  ~SnakeGame()
+  {
+    if (head != nullptr)
+    {
+      delete head;
+    }
+  }
+
+  void initializeGame(uint8_t level = 1)
+  {
+    // Initialize game state
+    isStarted = false; // Wait for user input to start
+    isGameOver = false;
+    direction = 1;            // Start moving right
+    score = (level - 1) * 32; // Base score on level
+    gameSpeed = level;        // Initial speed based on level
+    lastUpdateTime = 0;
+    showLeaderboard = false;
+    // Initialize snake segments
+    head = new SnakeSegment(1, 2);
+    tail = head;
+    // Place initial food
+    placeFood();
+  }
+
+  void resetGame()
+  {
+    // Clean up existing snake
+    if (head != nullptr)
+    {
+      delete head;
+      head = nullptr;
+      tail = nullptr;
+    }
+    // Reinitialize the game
+    initializeGame(1);
+  }
+
+  void update(uint32_t deltaTime)
+  {
+    if (isStarted && !isGameOver)
+    {
+      lastUpdateTime += deltaTime;
+      uint32_t speedInterval = 1000 / gameSpeed; // Speed increases with level
+
+      if (lastUpdateTime >= speedInterval)
+      {
+        lastUpdateTime = 0;
+        tick();
+      }
+    }
+  }
+
+  void render(MaskFrame &frame)
+  {
+    const uint8_t snakeR = 25;
+    const uint8_t snakeG = 255;
+    const uint8_t snakeB = 0;
+
+    const uint8_t foodR = 255;
+    const uint8_t foodG = 160;
+    const uint8_t foodB = 0;
+
+    frame.clear();
+
+    if (showLeaderboard && isGameOver)
+    {
+      // Render leaderboard in binary format
+      // Score is displayed as binary digits, each column represents a digit (0-9)
+      // Rightmost columns are least significant digits
+      // Different colors for each digit position
+
+      uint16_t displayScore = score;
+      const uint8_t NUM_DIGITS = 4; // Display up to 4 digits (0-9999)
+
+      // Define colors for each digit position (right to left)
+      const RGB digitColors[NUM_DIGITS] = {
+          {0, 255, 0},   // Ones place - Green
+          {0, 255, 255}, // Tens place - Cyan
+          {255, 255, 0}, // Hundreds place - Yellow
+          {255, 0, 255}  // Thousands place - Magenta
+      };
+
+      // Extract each digit and display in binary (4 bits each)
+      for (uint8_t digitPos = 0; digitPos < NUM_DIGITS; digitPos++)
+      {
+        uint8_t digit = displayScore % 10;
+        displayScore /= 10;
+
+        RGB color = digitColors[digitPos];
+
+        // Display 4 bits of the digit in a column (right to left)
+        // Column index: 3-digitPos for left eye, 7-digitPos for right eye
+        uint8_t leftCol = 3 - digitPos;
+        uint8_t rightCol = 7 - digitPos;
+
+        for (uint8_t bit = 0; bit < 4; bit++)
+        {
+          if (digit & (1 << bit))
+          {
+            if (digitPos < 4)
+            {
+              // Left eye columns 3,2,1,0
+              frame.left[3 - bit][leftCol] = color;
+            }
+            else
+            {
+              // Right eye columns 3,2,1,0 (if score > 9999)
+              frame.right[3 - bit][rightCol - 4] = color;
+            }
+          }
+        }
+      }
+    }
+
+    if (!isStarted || isGameOver && millis() % 1000 < 500)
+    {
+      return;
+    }
+
+    // Render snake
+    for (SnakeSegment *seg = head; seg != nullptr; seg = seg->next)
+    {
+      uint8_t x = seg->x;
+      uint8_t y = seg->y;
+
+      if (x < 4)
+      {
+        // Left eye (x = 0-3)
+        frame.left[y][x] = {snakeR, snakeG, snakeB};
+      }
+      else
+      {
+        // Right eye (x = 4-7)
+        frame.right[y][x - 4] = {snakeR, snakeG, snakeB};
+      }
+    }
+
+    // Render food
+    uint8_t foodX = foodLocation % 8;
+    uint8_t foodY = foodLocation / 8;
+
+    if (foodX < 4)
+    {
+      // Left eye
+      frame.left[foodY][foodX] = {foodR, foodG, foodB};
+    }
+    else
+    {
+      // Right eye
+      frame.right[foodY][foodX - 4] = {foodR, foodG, foodB};
+    }
+  }
+
+  // Helpers
+  void tick()
+  {
+    if (isStarted && !isGameOver)
+    {
+      if (moveSnake())
+      {
+        // Successful move
+      }
+      else
+      {
+        isStarted = false;
+        isGameOver = true;
+      }
+    }
+  }
+  bool moveSnake()
+  {
+    // Calculate new head position based on direction
+    uint8_t newX = head->x;
+    uint8_t newY = head->y;
+
+    switch (direction)
+    {
+    case 0: // Up
+      newY = (newY == 0) ? 3 : newY - 1;
+      break;
+    case 1: // Right
+      newX = (newX + 1) % 8;
+      break;
+    case 2: // Down
+      newY = (newY + 1) % 4;
+      break;
+    case 3: // Left
+      newX = (newX == 0) ? 7 : newX - 1;
+      break;
+    }
+
+    // Check for self-collision
+    if (hasSnakeAt(newX, newY))
+    {
+      return false;
+    }
+
+    // Create new head segment
+    SnakeSegment *newHead = new SnakeSegment(newX, newY);
+    newHead->next = head;
+    head = newHead;
+
+    // Check for food consumption
+    if (foodLocation == (newY * 8 + newX))
+    {
+      score++;
+      if (!placeFood())
+      {
+        initializeGame(++gameSpeed); // Restart if no space for food
+      }
+    }
+    else
+    {
+      // Remove tail segment
+      SnakeSegment *prev = nullptr;
+      for (SnakeSegment *seg = head; seg != tail; seg = seg->next)
+      {
+        prev = seg;
+      }
+      delete tail;
+      tail = prev;
+      if (tail)
+        tail->next = nullptr;
+    }
+
+    return true;
+  }
+
+  bool hasSnakeAt(uint8_t x, uint8_t y)
+  {
+    for (SnakeSegment *seg = head; seg != nullptr; seg = seg->next)
+    {
+      if (seg->x == x && seg->y == y)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool placeFood()
+  {
+    uint8_t attempts = 0;
+    const uint8_t MAX_ATTEMPTS = 64; // 8x4 = 32 total cells, try twice
+
+    while (attempts < MAX_ATTEMPTS)
+    {
+      uint8_t x = random(0, 8);
+      uint8_t y = random(0, 4);
+
+      if (!hasSnakeAt(x, y))
+      {
+        foodLocation = y * 8 + x; // Encode for 8-wide grid
+        return true;
+      }
+      attempts++;
+    }
+
+    // No valid location found (snake fills the grid)
+    return false;
+  }
+
+  // Actions
+  void leftButtonAction()
+  {
+    if (!isStarted && !isGameOver)
+    {
+      isStarted = true;
+      return;
+    }
+    else if (isGameOver)
+    {
+      resetGame();
+      return;
+    }
+
+    changeDirectionCounterClockwise();
+  }
+
+  void rightButtonAction()
+  {
+    if (isGameOver)
+    {
+      showLeaderboard = !showLeaderboard;
+      return;
+    }
+
+    changeDirectionClockwise();
+  }
+
+  void changeDirectionClockwise()
+  {
+    direction = (direction + 1) % 4;
+  }
+  void changeDirectionCounterClockwise()
+  {
+    direction = (direction + 3) % 4;
+  }
+};
+
+// ============================================
 // MAIN APPLICATION CODE
 // ============================================
 
@@ -1937,6 +2288,7 @@ void loop()
   case Core::Mode::MANUAL:
     // In manual mode, expression is controlled by button actions
     break;
+  case Core::Mode::SNAKE:
   case Core::Mode::ERROR:
     ledController.present(getErrorFrame());
     break;
@@ -2023,11 +2375,26 @@ void onButton1DoubleTap()
   Serial.println("Button 1: Double Tap");
   if (!buttonHandler.isButtonHeld(BUTTON2_PIN))
   {
-    setForQuickExpressionChange();
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      setForQuickExpressionChange();
+      break;
+    default:
+      break;
+    }
   }
   else
   {
-    expressionManager.nextMiscExpression();
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.nextMiscExpression();
+      break;
+
+    default:
+      break;
+    }
   }
 }
 
@@ -2036,11 +2403,27 @@ void onButton2DoubleTap()
   Serial.println("Button 2: Double Tap");
   if (!buttonHandler.isButtonHeld(BUTTON1_PIN))
   {
-    expressionManager.quickSwitch();
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.quickSwitch();
+      break;
+
+    default:
+      break;
+    }
   }
   else
   {
-    expressionManager.previousMiscExpression();
+    switch (modeManager.getMode())
+    {
+    case Core::Mode::ACTIVE:
+      expressionManager.previousMiscExpression();
+      break;
+
+    default:
+      break;
+    }
   }
 }
 
@@ -2059,13 +2442,33 @@ void onButton2Hold()
 void onButton1Release()
 {
   Serial.println("Button 1: Release");
-  toggleOnOffMode();
+  switch (modeManager.getMode())
+  {
+  case Core::Mode::OFF:
+    wakeUp();
+    break;
+  case Core::Mode::ACTIVE:
+    toggleOnOffMode();
+    break;
+
+  default:
+    break;
+  }
 }
 
 void onButton2Release()
 {
   Serial.println("Button 2: Release");
-  expressionManager.tagQuickExpression();
+  switch (modeManager.getMode())
+  {
+  case Core::Mode::OFF:
+    break;
+  case Core::Mode::ACTIVE:
+    expressionManager.tagQuickExpression();
+    break;
+  default:
+    break;
+  }
 }
 
 // --- HELPER FUNCTIONS ---
